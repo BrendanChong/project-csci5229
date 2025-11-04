@@ -24,7 +24,7 @@ CLEAN=rm -f $(EXE) *.o *.a
 endif
 
 # Dependencies
-project.o: project.c  CSCIx229.h
+project.o: project.cpp  CSCIx229.h
 fatal.o: fatal.c CSCIx229.h
 errcheck.o: errcheck.c CSCIx229.h
 print.o: print.c CSCIx229.h
@@ -40,11 +40,11 @@ CSCIx229.a:fatal.o errcheck.o print.o loadtexbmp.o loadobj.o projection.o
 .c.o:
 	gcc-13 -c $(CFLG)  $<
 .cpp.o:
-	g++ -c $(CFLG)  $<
+	g++-13 -c $(CFLG)  $<
 
 #  Link
 project:project.o   CSCIx229.a
-	gcc-13 $(CFLG) -o $@ $^  $(LIBS)
+	g++-13 $(CFLG) -o $@ $^  $(LIBS)
 
 #  Clean
 clean:
