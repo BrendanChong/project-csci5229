@@ -4,6 +4,8 @@
 #include <vector>
 #include <iostream>
 #include <string>
+#include <sstream>
+#include <bitset>
 #include "CSCIx229.h"
 #ifdef USEGLEW
 #include <GL/glew.h>
@@ -28,6 +30,16 @@ using LS = exprtk::expression<float>; // Level set function type - returns phi(x
 
 namespace moris::GUI
 {
+   /**
+    * For phase plotting
+    */
+   enum class PHASE
+   {
+      NONE,
+      POSITIVE,
+      NEGATIVE,
+      ALL
+   };
 
    //-----------------------------------------------------------
    // Global projection variables
@@ -84,7 +96,15 @@ namespace moris::GUI
    float tZUB = 1.0;                           // z upper bound
    float gX, gY, gZ;                           // Global coordinates for LS evaluation
    std::vector<LS> gLevelSets(MAX_GEOMETRIES); // Vector of level-set functions
-   uint tActiveGeometry = 0;
+   uint gActiveGeometry = 0;                   // Currently active geometry for user input
+   uint gNumGeoms = 0;                         // Number of geometries defined
+
+   //-----------------------------------------------------------
+   // Global phase variables
+   //-----------------------------------------------------------
+
+   std::vector<uint> gPhaseTable;                                     // Phase table
+   std::vector<PHASE> gGeomsPhaseToPlot(MAX_GEOMETRIES, PHASE::NONE); // 0 = don't plot, 1 = plot positive, -1 = plot negative, 2 = plot both
 
    // Colors for each geometry (Paraview KAAMS color scheme)
    std::vector<std::vector<float>> gColors = {
@@ -107,6 +127,37 @@ namespace moris::GUI
       for (int i = 0; i < num; i++)
          arr[i] = start + i * step;
       return arr;
+   }
+
+   /*
+    *  Convert an integer to binary representation to determine which phase to draw
+    */
+   std::vector<int> int_to_binary(int aValue)
+   {
+      // Create bitset from the integer value
+      std::bitset<MAX_GEOMETRIES> tBits(aValue);
+      std::vector<int> tBinary(MAX_GEOMETRIES, 0);
+      for (int i = 0; i < MAX_GEOMETRIES; i++)
+         tBinary[i] = tBits[MAX_GEOMETRIES - 1 - i];
+      return tBinary;
+   }
+
+   /**
+    * Convert binary vector to phase table
+    */
+   void set_phase_table_from_binary(const std::vector<int> &aBinary)
+   {
+      for (uint iG = MAX_GEOMETRIES; iG > 0; iG--)
+      {
+         if (aBinary[iG])
+         {
+            gGeomsPhaseToPlot[iG] = PHASE::POSITIVE;
+         }
+         else
+         {
+            gGeomsPhaseToPlot[iG] = PHASE::NEGATIVE;
+         }
+      }
    }
 
    /*
@@ -157,11 +208,47 @@ namespace moris::GUI
       glPopMatrix();
    }
 
-   LS getUserLSInput()
+   // Helper to trim whitespace from start and end of a string
+   std::string trim(const std::string &s)
+   {
+      size_t start = s.find_first_not_of(" \t\n\r");
+      if (start == std::string::npos)
+         return "";
+      size_t end = s.find_last_not_of(" \t\n\r");
+      return s.substr(start, end - start + 1);
+   }
+
+   std::vector<uint> get_phase_table_user_input()
    {
       // Print that we are asking for user input
       glWindowPos2i(5, 5);
-      Print("Enter a function of %s for the level-set function in the console. To be stored as Geometry %d", gSpatialDim == 2 ? "(x,y)" : "(x,y,z)", tActiveGeometry);
+      Print("Enter phase numbers for each geometry separated by spaces in the console.");
+
+      // Get user input from console
+      std::string tInput;
+      std::cout << "Enter phase numbers for each geometry separated by spaces:";
+      std::getline(std::cin, tInput);
+
+      std::vector<uint> tPhaseTable;
+      std::stringstream ss(tInput);
+      std::string token;
+
+      while (std::getline(ss, token, ' '))
+      {
+         token = trim(token); // remove whitespace
+         if (!token.empty())
+         {
+            tPhaseTable.push_back(static_cast<uint>(std::stoul(token)));
+         }
+      }
+      return tPhaseTable;
+   }
+
+   LS get_LS_user_input()
+   {
+      // Print that we are asking for user input
+      glWindowPos2i(5, 5);
+      Print("Enter a function of %s for the level-set function in the console. To be stored as Geometry %d", gSpatialDim == 2 ? "(x,y)" : "(x,y,z)", gActiveGeometry);
 
       // Get user input from console
       std::string tInput;
@@ -200,15 +287,21 @@ namespace moris::GUI
       return aLS.value();
    }
 
-   void drawLS3D(LS aLS)
+   void drawLS3D(LS aLS, PHASE aSign, uint aColorIndex)
    {
       // TODO
 
       Fatal("drawLS3D not implemented yet");
    }
 
-   void drawLS2D(LS aLS, uint aColorIndex)
+   void drawLS2D(LS aLS, PHASE aSign, uint aColorIndex)
    {
+      // Check if we need to plot this geometry
+      if (aSign == PHASE::NONE)
+      {
+         return; // don't plot
+      }
+
       glPushMatrix();
 
       std::vector<float> tXVals = linspace(tXLB, tXUB, NUM_POINTS);
@@ -234,8 +327,17 @@ namespace moris::GUI
             // ny /= length;
             // nz /= length;
 
-            // Set color, normal, texture coord, and vertex
-            glColor3d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2]);
+            // Check sign condition
+            if ((aSign == PHASE::POSITIVE && y < 0) || (aSign == PHASE::NEGATIVE && y > 0))
+            {
+               y = 0.0f;                 // Clamp to zero level-set
+               glColor3d(0.0, 0.0, 0.0); // Black color for clamped points (to hide plot)
+            }
+            else
+            {
+               // Set color, normal, texture coord, and vertex
+               glColor3d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2]);
+            }
             // glNormal3d(nx, ny, nz);
             glVertex3d(x, y, z);
 
@@ -252,7 +354,17 @@ namespace moris::GUI
             // ny /= length;
             // nz /= length;
 
-            glColor3d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2]);
+            // Check sign condition
+            if ((aSign == PHASE::POSITIVE && y < 0) || (aSign == PHASE::NEGATIVE && y > 0))
+            {
+               y = 0.0f;                 // Clamp to zero level-set
+               glColor3d(0.0, 0.0, 0.0); // Black color for clamped points (to hide plot)
+            }
+            else
+            {
+               // Set color, normal, texture coord, and vertex
+               glColor3d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2]);
+            }
             // glNormal3d(nx, ny, nz);
             glVertex3d(x, y, z);
          }
@@ -326,12 +438,19 @@ namespace moris::GUI
       {
       case 2:
       {
-         drawLS2D(gLevelSets[tActiveGeometry], tActiveGeometry);
+         for (uint iG = 0; iG < MAX_GEOMETRIES; iG++)
+         {
+
+            drawLS2D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG);
+         }
          break;
       }
       case 3:
       {
-         drawLS3D(gLevelSets[tActiveGeometry]);
+         for (uint iG = 0; iG < MAX_GEOMETRIES; iG++)
+         {
+            drawLS3D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG);
+         }
          break;
       }
       default:
@@ -412,60 +531,163 @@ namespace moris::GUI
       {
          tAxes = 1 - tAxes;
       }
-      else if (ch == 'n' || ch == 'N')
-      {
-         tMoveLight = 1 - tMoveLight;
-      }
       else if (ch == 't' || ch == 'T')
       {
          tTextures = 1 - tTextures;
       }
+      else if (ch == 'n' || ch == 'N')
+      {
+         // Add a new geometry
+         if (gNumGeoms < MAX_GEOMETRIES)
+         {
+            gActiveGeometry = gNumGeoms;
+            gLevelSets[gNumGeoms] = get_LS_user_input();
+            gGeomsPhaseToPlot[gNumGeoms] = PHASE::ALL; // Default to plot all phases
+            gNumGeoms++;
+         }
+         else
+         {
+            std::cout << "Maximum number of geometries reached." << std::endl;
+         }
+      }
+      else if (ch == 'p' || ch == 'P')
+      {
+         // Get user input for phase table
+         gPhaseTable = get_phase_table_user_input();
+      }
       else if (ch == '0')
       {
-         tActiveGeometry = 0;
+         gActiveGeometry = 0;
       }
       else if (ch == '1')
       {
-         tActiveGeometry = 1;
+         gActiveGeometry = 1;
       }
       else if (ch == '2')
       {
-         tActiveGeometry = 2;
+         gActiveGeometry = 2;
       }
       else if (ch == '3')
       {
-         tActiveGeometry = 3;
+         gActiveGeometry = 3;
       }
       else if (ch == '4')
       {
-         tActiveGeometry = 4;
+         gActiveGeometry = 4;
       }
       else if (ch == '5')
       {
-         tActiveGeometry = 5;
+         gActiveGeometry = 5;
       }
       else if (ch == '6')
       {
-         tActiveGeometry = 6;
+         gActiveGeometry = 6;
       }
       else if (ch == '7')
       {
-         tActiveGeometry = 7;
+         gActiveGeometry = 7;
       }
       else if (ch == '8')
       {
-         tActiveGeometry = 8;
+         gActiveGeometry = 8;
       }
       else if (ch == '9')
       {
-         tActiveGeometry = 9;
+         gActiveGeometry = 9;
+      }
+      else if (ch == 129) // F1 key
+      {
+         // Convert 1 to binary
+         std::vector<int> tBinary = int_to_binary(1);
+
+         set_phase_table_from_binary(tBinary);
+      }
+      else if (ch == 130) // F2 key
+      {
+         // Convert 2 to binary
+         std::vector<int> tBinary = int_to_binary(2);
+
+         set_phase_table_from_binary(tBinary);
+      }
+      else if (ch == 131) // F3 key
+      {
+         // Convert 3 to binary
+         std::vector<int> tBinary = int_to_binary(3);
+
+         set_phase_table_from_binary(tBinary);
+      }
+      else if (ch == 132) // F4 key
+      {
+         // Convert 4 to binary
+         std::vector<int> tBinary = int_to_binary(4);
+
+         set_phase_table_from_binary(tBinary);
+      }
+      else if (ch == 133) // F5 key
+      {
+         // Convert 5 to binary
+         std::vector<int> tBinary = int_to_binary(5);
+
+         set_phase_table_from_binary(tBinary);
+      }
+      else if (ch == 134) // F6 key
+      {
+         // Convert 6 to binary
+         std::vector<int> tBinary = int_to_binary(6);
+
+         set_phase_table_from_binary(tBinary);
+      }
+      else if (ch == 135) // F7 key
+      {
+         // Convert 7 to binary
+         std::vector<int> tBinary = int_to_binary(7);
+
+         set_phase_table_from_binary(tBinary);
+      }
+      else if (ch == 136) // F8 key
+      {
+         // Convert 8 to binary
+         std::vector<int> tBinary = int_to_binary(8);
+
+         set_phase_table_from_binary(tBinary);
+      }
+      else if (ch == 137) // F9 key
+      {
+         // Convert 9 to binary
+         std::vector<int> tBinary = int_to_binary(9);
+
+         set_phase_table_from_binary(tBinary);
+      }
+      else if (ch == 138) // F10 key
+      {
+         // Convert 10 to binary
+         std::vector<int> tBinary = int_to_binary(10);
+
+         set_phase_table_from_binary(tBinary);
+      }
+      else if (ch == 139) // F11 key
+      {
+         // Convert 11 to binary
+         std::vector<int> tBinary = int_to_binary(11);
+
+         set_phase_table_from_binary(tBinary);
+      }
+      else if (ch == 140) // F12 key
+      {
+         // Convert 12 to binary
+         std::vector<int> tBinary = int_to_binary(12);
+
+         set_phase_table_from_binary(tBinary);
       }
       else if (ch == 27) // Escape key
          exit(0);
       else if (ch == 13) // Enter key
       {
          // Get user input for the current active geometry
-         gLevelSets[tActiveGeometry] = getUserLSInput();
+         gLevelSets[gActiveGeometry] = get_LS_user_input();
+
+         // Set to plot this geometry
+         gGeomsPhaseToPlot[gActiveGeometry] = PHASE::ALL;
       }
 
       glutPostRedisplay();
