@@ -6,6 +6,7 @@
 #include <string>
 #include <sstream>
 #include <bitset>
+#include <numeric>
 #include "CSCIx229.h"
 #ifdef USEGLEW
 #include <GL/glew.h>
@@ -24,9 +25,9 @@
 #endif
 
 #define NUM_POINTS 100    // number of points in each direction for the grid
-#define MAX_GEOMETRIES 10 // Maximum number of geometries
+#define MAX_GEOMETRIES 5 // Maximum number of geometries
 
-using LS = exprtk::expression<float>; // Level set function type - returns phi(x,y,z)
+using LS = exprtk::expression<double>; // Level set function type - returns phi(x,y,z)
 
 namespace moris::GUI
 {
@@ -46,10 +47,10 @@ namespace moris::GUI
    //-----------------------------------------------------------
 
    // FIXME: change names to global convention
-   float tAsp = 16.0 / 9.0; // Aspect ratio
+   double tAsp = 16.0 / 9.0; // Aspect ratio
    int tFOV = 110;          // Field of view for perspective
    int tMode = 0;           // perspective mode switcher
-   float tDim = 3.5;        // Size of the world
+   double tDim = 3.5;        // Size of the world
    int tPhi = 20;           // Elevation of view angle
    int tTheta = 0;          // Azimuth of view angle
 
@@ -68,7 +69,7 @@ namespace moris::GUI
    int gDiffuse = 50;  // Diffuse intensity (%)
    int gSpecular = 5;  // Specular intensity (%)
    int gShininess = 0; // Shininess (power of two)
-   float tShiny = 1;   // Shininess (value)
+   double tShiny = 1;   // Shininess (value)
    int tZeta = 90;     // Light azimuth
    float tYLight = 5;  // Elevation of light
 
@@ -88,26 +89,32 @@ namespace moris::GUI
    //-----------------------------------------------------------
    // Global LS variables
    //-----------------------------------------------------------
-   uint gSpatialDim = 2;                       // Spatial dimension (2D/3D)
-   int tAxes = 0;                              // Display axes or not
-   float tXLB = -1.0;                          // x lower bound
-   float tXUB = 1.0;                           // x upper bound
-   float tZLB = -1.0;                          // z lower bound
-   float tZUB = 1.0;                           // z upper bound
-   float gX, gY, gZ;                           // Global coordinates for LS evaluation
+   int gSpatialDim = 2;                       // Spatial dimension (2D/3D)
+   int tAxes = 1;                              // Display axes or not
+   double tXLB = -1.0;                          // x lower bound
+   double tXUB = 1.0;                           // x upper bound
+   double tZLB = -1.0;                          // z lower bound
+   double tZUB = 1.0;                           // z upper bound
+   double gX, gY, gZ;                           // Global coordinates for LS evaluation
    std::vector<LS> gLevelSets(MAX_GEOMETRIES); // Vector of level-set functions
-   uint gActiveGeometry = 0;                   // Currently active geometry for user input
-   uint gNumGeoms = 0;                         // Number of geometries defined
+   int gActiveGeometry = 0;                   // Currently active geometry for user input
+   int gNumGeoms = 0;                         // Number of geometries defined
 
    //-----------------------------------------------------------
    // Global phase variables
    //-----------------------------------------------------------
 
-   std::vector<uint> gPhaseTable;                                     // Phase table
+   // Phase table: initialize with values 0,1,2,...,(2^MAX_GEOMETRIES)-1
+   std::vector<int> gPhaseTable = [](){
+      int n = 1 << MAX_GEOMETRIES; // 2^MAX_GEOMETRIES (integer shift avoids <cmath>)
+      std::vector<int> v(n);
+      std::iota(v.begin(), v.end(), 0);
+      return v;
+   }();
    std::vector<PHASE> gGeomsPhaseToPlot(MAX_GEOMETRIES, PHASE::NONE); // 0 = don't plot, 1 = plot positive, -1 = plot negative, 2 = plot both
 
    // Colors for each geometry (Paraview KAAMS color scheme)
-   std::vector<std::vector<float>> gColors = {
+   std::vector<std::vector<double>> gColors = {
        {1.0, 0.0, 0.0},
        {0.0, 1.0, 0.0},
        {0.0, 0.0, 1.0},
@@ -120,10 +127,10 @@ namespace moris::GUI
        {0.5, 0.0, 0.5}};
 
    // For generating sampling points
-   std::vector<float> linspace(float start, float end, int num)
+   std::vector<double> linspace(double start, double end, int num)
    {
-      std::vector<float> arr(num);
-      float step = (end - start) / (num - 1);
+      std::vector<double> arr(num);
+      double step = (end - start) / (num - 1);
       for (int i = 0; i < num; i++)
          arr[i] = start + i * step;
       return arr;
@@ -142,20 +149,111 @@ namespace moris::GUI
       return tBinary;
    }
 
-   /**
-    * Convert binary vector to phase table
-    */
-   void set_phase_table_from_binary(const std::vector<int> &aBinary)
+   /*
+   * Gets the indices of the phase table that correspond to a given phase
+   */
+   std::vector<int> get_indices_for_phase(int aPhase)
    {
-      for (uint iG = MAX_GEOMETRIES; iG > 0; iG--)
+      std::vector<int> indices;
+      for (int i = 0; i < gPhaseTable.size(); i++)
       {
-         if (aBinary[iG])
+         if (gPhaseTable[i] == aPhase)
          {
-            gGeomsPhaseToPlot[iG] = PHASE::POSITIVE;
+            indices.push_back(i);
+         }
+      }
+      return indices;
+   }
+
+   void reset_active_phases()
+   {
+      for (int iG = 0; iG < MAX_GEOMETRIES; iG++)
+      {
+         gGeomsPhaseToPlot[iG] = PHASE::NONE;
+      }
+   }
+
+   /**
+    * Adds geometry phases to plot from binary representation
+    * If bit is 1, plot positive phase; if bit is 0, plot negative phase
+    * Ex. If positive phase is already active but the binary indicates negative phase, it will then plot both pos and neg phases
+    */
+   void append_active_phases_from_binary(const std::vector<int> &aBinary)
+   {
+      for (int iG = 0; iG < MAX_GEOMETRIES; iG++)
+      {
+         if( aBinary[iG] == 1)
+         {
+            // Set to plot positive phase
+            if(gGeomsPhaseToPlot[iG] == PHASE::NONE)
+            {
+               gGeomsPhaseToPlot[iG] = PHASE::POSITIVE;
+            }
+            else if(gGeomsPhaseToPlot[iG] == PHASE::NEGATIVE)
+            {
+               gGeomsPhaseToPlot[iG] = PHASE::ALL;
+            }
          }
          else
          {
+            // Set to plot negative phase
+            if(gGeomsPhaseToPlot[iG] == PHASE::NONE)
+            {
+               gGeomsPhaseToPlot[iG] = PHASE::NEGATIVE;
+            }
+            else if(gGeomsPhaseToPlot[iG] == PHASE::POSITIVE)
+            {
+               gGeomsPhaseToPlot[iG] = PHASE::ALL;
+            }
+         }
+      }
+   }
+
+   /**
+    * Gets all the bitsets from the phase table that are assigned to a given phase index,
+    * then sets the active geometry phases to plot accordingly
+    */
+   void set_active_phases_from_phase_index( int aIndex )
+   {
+      // Reset active phases
+      reset_active_phases();
+
+      // Get all the indices for the given phase
+      std::vector<int> tIndices = get_indices_for_phase(aIndex);
+
+      // Loop through the indices and convert to binary to set active regions for each geometry
+      for(int iIndex : tIndices)
+      {
+         std::vector<int> tBinary = int_to_binary(iIndex); // Get the geometry signs for this index
+
+         append_active_phases_from_binary(tBinary); // Add them to the active phases
+      }
+   }
+
+   /**
+    * Function to see the negative region for all currently active geometries
+    */
+   void set_all_active_phases_to_negative()
+   {
+      for (int iG = 0; iG < MAX_GEOMETRIES; iG++)
+      {
+         if( gGeomsPhaseToPlot[iG] != PHASE::NONE )
+         {
             gGeomsPhaseToPlot[iG] = PHASE::NEGATIVE;
+         }
+      }
+   }
+
+      /**
+    * Function to see the positive region for all currently active geometries
+    */
+   void set_all_active_phases_to_positive()
+   {
+      for (int iG = 0; iG < MAX_GEOMETRIES; iG++)
+      {
+         if( gGeomsPhaseToPlot[iG] != PHASE::NONE )
+         {
+            gGeomsPhaseToPlot[iG] = PHASE::POSITIVE;
          }
       }
    }
@@ -163,11 +261,11 @@ namespace moris::GUI
    /*
     *  Draw vertex in polar coordinates with normal
     */
-   static void Vertex(float th, float ph)
+   static void Vertex(double th, double ph)
    {
-      float x = Sin(th) * Cos(ph);
-      float y = Cos(th) * Cos(ph);
-      float z = Sin(ph);
+      double x = Sin(th) * Cos(ph);
+      double y = Cos(th) * Cos(ph);
+      double z = Sin(ph);
       //  For a sphere at the origin, the position
       //  and normal vectors are the same
       glNormal3d(x, y, z);
@@ -179,7 +277,7 @@ namespace moris::GUI
     *     at (x,y,z)
     *     radius (r)
     */
-   static void ball(float x, float y, float z, float r)
+   static void ball(double x, double y, double z, double r)
    {
       //  Save transformation
       glPushMatrix();
@@ -188,7 +286,7 @@ namespace moris::GUI
       glScaled(r, r, r);
       //  White ball with yellow specular
       float yellow[] = {1.0, 1.0, 0.0, 1.0};
-      float Emission[] = {0.0, 0.0, 0.01 * gEmission, 1.0};
+      float Emission[] = {0.0, 0.0, (float)0.01 * gEmission, 1.0};
       glColor3f(1, 1, 1);
       glMaterialf(GL_FRONT, GL_SHININESS, tShiny);
       glMaterialfv(GL_FRONT, GL_SPECULAR, yellow);
@@ -218,7 +316,7 @@ namespace moris::GUI
       return s.substr(start, end - start + 1);
    }
 
-   std::vector<uint> get_phase_table_user_input()
+   std::vector<int> get_phase_table_user_input()
    {
       // Print that we are asking for user input
       glWindowPos2i(5, 5);
@@ -229,16 +327,18 @@ namespace moris::GUI
       std::cout << "Enter phase numbers for each geometry separated by spaces:";
       std::getline(std::cin, tInput);
 
-      std::vector<uint> tPhaseTable;
+      std::vector<int> tPhaseTable( MAX_GEOMETRIES, -1);
       std::stringstream ss(tInput);
       std::string token;
 
+      int tPhase = 0;
       while (std::getline(ss, token, ' '))
       {
          token = trim(token); // remove whitespace
          if (!token.empty())
          {
-            tPhaseTable.push_back(static_cast<uint>(std::stoul(token)));
+            tPhaseTable[tPhase] = static_cast<int>(std::stoul(token));
+            tPhase++;
          }
       }
       return tPhaseTable;
@@ -252,22 +352,22 @@ namespace moris::GUI
 
       // Get user input from console
       std::string tInput;
-      std::cout << (gSpatialDim == 2 ? "Enter a level-set function of %s(x,y):" : "Enter a level-set function of (x,y,z):");
+      std::cout << (gSpatialDim == 2 ? "Enter a level-set function of (x,y):" : "Enter a level-set function of (x,y,z):");
       std::getline(std::cin, tInput);
 
       // Define LS variables, add them to exprtk symbol table
-      exprtk::symbol_table<float> tSymbolTable;
+      exprtk::symbol_table<double> tSymbolTable;
       tSymbolTable.add_variable("x", gX);
       tSymbolTable.add_variable("y", gY);
       tSymbolTable.add_variable("z", gZ);
       tSymbolTable.add_constants();
 
       // Create expression
-      exprtk::expression<float> tExpression;
+      exprtk::expression<double> tExpression;
       tExpression.register_symbol_table(tSymbolTable);
 
       // Parse the user input
-      exprtk::parser<float> tParser;
+      exprtk::parser<double> tParser;
       if (!tParser.compile(tInput, tExpression))
       {
          Fatal("Error: Failed to parse expression: %s", tInput.c_str());
@@ -276,7 +376,7 @@ namespace moris::GUI
       return tExpression;
    }
 
-   float eval_LS(LS aLS, float aX, float aY, float aZ = 0.0f)
+   double eval_LS(LS aLS, double aX, double aY, double aZ = 0.0f)
    {
       // Set global coordinates
       gX = aX;
@@ -287,14 +387,14 @@ namespace moris::GUI
       return aLS.value();
    }
 
-   void drawLS3D(LS aLS, PHASE aSign, uint aColorIndex)
+   void drawLS3D(LS aLS, PHASE aSign, int aColorIndex)
    {
       // TODO
 
       Fatal("drawLS3D not implemented yet");
    }
 
-   void drawLS2D(LS aLS, PHASE aSign, uint aColorIndex)
+   void drawLS2D(LS aLS, PHASE aSign, int aColorIndex)
    {
       // Check if we need to plot this geometry
       if (aSign == PHASE::NONE)
@@ -304,8 +404,8 @@ namespace moris::GUI
 
       glPushMatrix();
 
-      std::vector<float> tXVals = linspace(tXLB, tXUB, NUM_POINTS);
-      std::vector<float> tYVals = linspace(tZLB, tZUB, NUM_POINTS);
+      std::vector<double> tXVals = linspace(tXLB, tXUB, NUM_POINTS);
+      std::vector<double> tYVals = linspace(tZLB, tZUB, NUM_POINTS);
 
       // Draw the surface
       for (int i = 0; i < NUM_POINTS - 1; i++)
@@ -314,15 +414,15 @@ namespace moris::GUI
          for (int j = 0; j < NUM_POINTS; j++)
          {
             // Compute coordinates from LS function
-            float x = tXVals[i];
-            float z = tYVals[j]; // Since OpenGL Y is up, we use Z here. LS function is still (x,y)
-            float y = eval_LS(aLS, x, z);
+            double x = tXVals[i];
+            double z = tYVals[j]; // Since OpenGL Y is up, we use Z here. LS function is still (x,y)
+            double y = eval_LS(aLS, x, z);
 
             // Compute normal
-            // float nx = -gradX(x, z);
-            // float ny = 1.0;
-            // float nz = -gradZ(x, z);
-            // float length = sqrt(nx * nx + ny * ny + nz * nz);
+            // double nx = -gradX(x, z);
+            // double ny = 1.0;
+            // double nz = -gradZ(x, z);
+            // double length = sqrt(nx * nx + ny * ny + nz * nz);
             // nx /= length;
             // ny /= length;
             // nz /= length;
@@ -395,11 +495,11 @@ namespace moris::GUI
       if (tLight)
       {
          //  Translate intensity to color vectors
-         float Ambient[] = {0.01 * gAmbient, 0.01 * gAmbient, 0.01 * gAmbient, 1.0};
-         float Diffuse[] = {0.01 * gDiffuse, 0.01 * gDiffuse, 0.01 * gDiffuse, 1.0};
-         float Specular[] = {0.01 * gSpecular, 0.01 * gSpecular, 0.01 * gSpecular, 1.0};
+         float Ambient[] = {(float)0.01 * gAmbient, (float)0.01 * gAmbient, (float)0.01 * gAmbient, 1.0};
+         float Diffuse[] = {(float)0.01 * gDiffuse, (float)0.01 * gDiffuse, (float)0.01 * gDiffuse, 1.0};
+         float Specular[] = {(float)0.01 * gSpecular, (float)0.01 * gSpecular, (float)0.01 * gSpecular, 1.0};
          //  Light position
-         float Position[] = {tDistance * Cos(tZeta), tYLight, tDistance * Sin(tZeta), 1.0};
+         float Position[] = {tDistance * (float)Cos(tZeta), tYLight, tDistance * (float)Sin(tZeta), 1.0};
          //  Draw light position as ball (still no lighting here)
          glColor3f(1, 1, 1);
          ball(Position[0], Position[1], Position[2], 0.1);
@@ -438,16 +538,15 @@ namespace moris::GUI
       {
       case 2:
       {
-         for (uint iG = 0; iG < MAX_GEOMETRIES; iG++)
+         for (int iG = 0; iG < MAX_GEOMETRIES; iG++)
          {
-
             drawLS2D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG);
          }
          break;
       }
       case 3:
       {
-         for (uint iG = 0; iG < MAX_GEOMETRIES; iG++)
+         for (int iG = 0; iG < MAX_GEOMETRIES; iG++)
          {
             drawLS3D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG);
          }
@@ -502,7 +601,7 @@ namespace moris::GUI
    void reshape(int width, int height)
    {
       // Avoid divide by zero
-      tAsp = (height > 0) ? (float)width / height : 1;
+      tAsp = (height > 0) ? (double)width / height : 1;
 
       glViewport(0, 0, width, height);
 
@@ -595,89 +694,73 @@ namespace moris::GUI
       {
          gActiveGeometry = 9;
       }
+      else if (ch == '_')
+      {
+         set_active_phases_from_phase_index(0); // since there's no F0 key
+      }
       else if (ch == 129) // F1 key
       {
-         // Convert 1 to binary
-         std::vector<int> tBinary = int_to_binary(1);
-
-         set_phase_table_from_binary(tBinary);
+         set_active_phases_from_phase_index(1);
       }
       else if (ch == 130) // F2 key
       {
-         // Convert 2 to binary
-         std::vector<int> tBinary = int_to_binary(2);
-
-         set_phase_table_from_binary(tBinary);
+         set_active_phases_from_phase_index(2);
       }
       else if (ch == 131) // F3 key
       {
-         // Convert 3 to binary
-         std::vector<int> tBinary = int_to_binary(3);
-
-         set_phase_table_from_binary(tBinary);
+         set_active_phases_from_phase_index(3);
       }
       else if (ch == 132) // F4 key
       {
-         // Convert 4 to binary
-         std::vector<int> tBinary = int_to_binary(4);
-
-         set_phase_table_from_binary(tBinary);
+         set_active_phases_from_phase_index(4);
       }
       else if (ch == 133) // F5 key
       {
-         // Convert 5 to binary
-         std::vector<int> tBinary = int_to_binary(5);
-
-         set_phase_table_from_binary(tBinary);
+         set_active_phases_from_phase_index(5);
       }
       else if (ch == 134) // F6 key
       {
-         // Convert 6 to binary
-         std::vector<int> tBinary = int_to_binary(6);
-
-         set_phase_table_from_binary(tBinary);
+         set_active_phases_from_phase_index(6);
       }
       else if (ch == 135) // F7 key
       {
-         // Convert 7 to binary
-         std::vector<int> tBinary = int_to_binary(7);
-
-         set_phase_table_from_binary(tBinary);
+         set_active_phases_from_phase_index(7);
       }
       else if (ch == 136) // F8 key
       {
-         // Convert 8 to binary
-         std::vector<int> tBinary = int_to_binary(8);
-
-         set_phase_table_from_binary(tBinary);
+         set_active_phases_from_phase_index(8);
       }
       else if (ch == 137) // F9 key
       {
-         // Convert 9 to binary
-         std::vector<int> tBinary = int_to_binary(9);
-
-         set_phase_table_from_binary(tBinary);
+         set_active_phases_from_phase_index(9);
       }
       else if (ch == 138) // F10 key
       {
-         // Convert 10 to binary
-         std::vector<int> tBinary = int_to_binary(10);
-
-         set_phase_table_from_binary(tBinary);
+         set_active_phases_from_phase_index(10);
       }
       else if (ch == 139) // F11 key
       {
-         // Convert 11 to binary
-         std::vector<int> tBinary = int_to_binary(11);
-
-         set_phase_table_from_binary(tBinary);
+         set_active_phases_from_phase_index(11);
       }
       else if (ch == 140) // F12 key
       {
-         // Convert 12 to binary
-         std::vector<int> tBinary = int_to_binary(12);
-
-         set_phase_table_from_binary(tBinary);
+         set_active_phases_from_phase_index(12);
+      }
+      else if (ch == '+')
+      {
+         set_all_active_phases_to_positive();
+      }
+      else if (ch == '-')
+      {
+         set_all_active_phases_to_negative();
+      }
+      else if (ch == 32) // space bar
+      {
+         // Plot all phases
+         for( int iG = 0; iG < MAX_GEOMETRIES; iG++ )
+         {
+            gGeomsPhaseToPlot[iG] = PHASE::ALL;
+         }
       }
       else if (ch == 27) // Escape key
          exit(0);
@@ -688,6 +771,15 @@ namespace moris::GUI
 
          // Set to plot this geometry
          gGeomsPhaseToPlot[gActiveGeometry] = PHASE::ALL;
+      }
+
+      // If a number key was pressed, update the active phases to plot to only plot that geometry
+      if( ch == '0' || ch == '1' || ch == '2' || ch == '3' || ch == '4' ||
+          ch == '5' || ch == '6' || ch == '7' || ch == '8' || ch == '9' )
+      {
+         int tGeomIndex = ch - '0';
+         reset_active_phases();
+         gGeomsPhaseToPlot[tGeomIndex] = PHASE::ALL;
       }
 
       glutPostRedisplay();
@@ -813,7 +905,7 @@ int main(int argc, char *argv[])
 {
    //  Initialize GLUT
    glutInit(&argc, argv);
-   //  Request float buffered true color window without Z-buffer
+   //  Request double buffered true color window without Z-buffer
    glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE | GLUT_DEPTH);
    //  Create window
    glutCreateWindow("Brendan Chong - Sloshing box");
