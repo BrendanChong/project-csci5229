@@ -50,7 +50,7 @@ namespace moris::GUI
    double tAsp = 16.0 / 9.0; // Aspect ratio
    int tFOV = 110;           // Field of view for perspective
    int tMode = 0;            // perspective mode switcher
-   double tDim = 3.5;        // Size of the world
+   double tDim = 1.7;        // Size of the world
    int tPhi = 20;            // Elevation of view angle
    int tTheta = 0;           // Azimuth of view angle
 
@@ -633,7 +633,7 @@ namespace moris::GUI
       else
          glDisable(GL_TEXTURE_2D);
 
-      // Set the plot to be centered at the origin
+      // Set the plot to be centered at the middle of the domain
       glTranslated((-0.5 * (tXLB + tXUB)), 0.0, (-0.5 * (tZLB + tZUB)));
 
       switch (gSpatialDim)
@@ -686,8 +686,8 @@ namespace moris::GUI
       // Display settings
       glColor3f(1.0, 1.0, 1.0);
       glWindowPos2i(5, 25);
-      Print("(th,ph)=%d,%d  Dim=%.1f Light=%s Lighting type=%s",
-            tTheta, tPhi, tDim, tLight ? "On" : "Off", tSmooth ? "Smooth" : "Flat");
+      Print("Domain_x=[%f,%f] Domain_z=[%f,%f] Light=%s Lighting type=%s",
+            tXLB, tXUB, tZLB, tZUB, tLight ? "On" : "Off", tSmooth ? "Smooth" : "Flat");
 
       // Print phase table for user reference
       print_phase_table();
@@ -1008,20 +1008,34 @@ namespace moris::GUI
          if (state == GLUT_UP)
             return; // Only handle wheel on button down
 
-         if (button == 3) // Scroll up - zoom in
+         if (button == 3) // Scroll up - make the plotting domain smaller
          {
-            tDim *= 0.9;
+            float tLength = tXUB - tXLB;
+            float tCenter = 0.5 * (tXUB + tXLB);
+            tLength *= 0.98; // Zoom in by reducing length by 2%
+            tXLB = tCenter - 0.5 * tLength;
+            tXUB = tCenter + 0.5 * tLength;
+
+            tLength = tZUB - tZLB;
+            tCenter = 0.5 * (tZUB + tZLB);
+            tLength *= 0.98; // Zoom in by reducing length by 2%
+            tZLB = tCenter - 0.5 * tLength;
+            tZUB = tCenter + 0.5 * tLength;
          }
          else if (button == 4) // Scroll down - zoom out
          {
-            tDim *= 1.1;
-         }
+            float tLength = tXUB - tXLB;
+            float tCenter = 0.5 * (tXUB + tXLB);
+            tLength *= 1.02; // Zoom out by increasing length by 2%
+            tXLB = tCenter - 0.5 * tLength;
+            tXUB = tCenter + 0.5 * tLength;
 
-         // Keep dim within reasonable bounds
-         if (tDim < 0.1)
-            tDim = 0.1;
-         if (tDim > 50.0)
-            tDim = 50.0;
+            tLength = tZUB - tZLB;
+            tCenter = 0.5 * (tZUB + tZLB);
+            tLength *= 1.02; // Zoom out by increasing length by 2%
+            tZLB = tCenter - 0.5 * tLength;
+            tZUB = tCenter + 0.5 * tLength;
+         }
 
          // Update the projection
          if (tMode == 0)
