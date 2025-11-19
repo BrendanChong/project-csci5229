@@ -363,6 +363,8 @@ namespace moris::GUI
       {
          Fatal("Error: Failed to parse expression: %s", aInput.c_str());
       }
+
+      return tExpression;
    }
 
    LS get_LS_user_input()
@@ -790,7 +792,7 @@ namespace moris::GUI
       {
          // Load demo level-set functions
          gLevelSets[0] = load_LS_from_string("sin(0.43*x)+cos(y)-1");
-         gLevelSets[1] = load_LS_from_string("sin(x)-1.2*cos(y)");
+         gLevelSets[1] = load_LS_from_string("sin(x)-1.2*cos(y)+1");
          gLevelSets[2] = load_LS_from_string("x^2+y^2-1");
          gNumGeoms = 3;
          
