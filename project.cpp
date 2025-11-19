@@ -57,7 +57,7 @@ namespace moris::GUI
    //-----------------------------------------------------------
    // Global lighting variables
    //-----------------------------------------------------------
-   int tLight = 1;     // Lighting on or off
+   int tLight = 0;     // Lighting on or off
    int tSmooth = 1;    // Smooth/Flat shading
    int tMoveLight = 1; // Move light in idle or not
 
@@ -139,13 +139,18 @@ namespace moris::GUI
    /*
     *  Convert an integer to binary representation to determine which phase to draw
     */
-   std::vector<int> int_to_binary(int aValue)
+   std::vector<int> int_to_binary(unsigned int aValue, int bits = MAX_GEOMETRIES)
    {
-      // Create bitset from the integer value
-      std::bitset<MAX_GEOMETRIES> tBits(aValue);
-      std::vector<int> tBinary(MAX_GEOMETRIES, 0);
-      for (int i = 0; i < MAX_GEOMETRIES; i++)
-         tBinary[i] = tBits[MAX_GEOMETRIES - 1 - i];
+      if (bits <= 0)
+         return {};
+
+      std::vector<int> tBinary(bits, 0);
+      // Fill MSB-first: tBinary[0] = bit (bits-1)
+      for (int i = 0; i < bits; ++i)
+      {
+         int pos = bits - 1 - i;
+         tBinary[i] = static_cast<int>((aValue >> pos) & 1u);
+      }
       return tBinary;
    }
 
@@ -224,7 +229,7 @@ namespace moris::GUI
       // Loop through the bitsets and convert to binary to set active regions for each geometry
       for(int iIndex : tIndices)
       {
-         std::vector<int> tBinary = int_to_binary(iIndex); // Get the geometry signs for this index
+         std::vector<int> tBinary = int_to_binary(iIndex, gNumGeoms); // Get the geometry signs for this index
 
          append_active_phases_from_binary(tBinary); // Add them to the active phases
       }
@@ -316,32 +321,54 @@ namespace moris::GUI
       return s.substr(start, end - start + 1);
    }
 
-   std::vector<int> get_phase_table_user_input()
+   void get_phase_table_user_input()
    {
-      // Print that we are asking for user input
+      // Prompt for user input
       glWindowPos2i(5, 5);
-      Print("Enter phase numbers for each geometry separated by spaces in the console.");
+      Print("Enter phase numbers for each geometry separated by commas or spaces in the console.");
 
-      // Get user input from console
+      // Read a full line from console
       std::string tInput;
-      std::cout << "Enter phase numbers for each geometry separated by spaces:";
+      std::cout << "Enter phase numbers for each geometry (comma or space separated): ";
       std::getline(std::cin, tInput);
 
-      std::vector<int> tPhaseTable( MAX_GEOMETRIES, -1);
+      // Normalize delimiters: replace commas with spaces so we can use >> extraction
+      for (char &c : tInput)
+      {
+         if (c == ',')
+            c = ' ';
+      }
+
+      // Initialize phase table to default 0 values, then overwrite with user input
+      std::fill(gPhaseTable.begin(), gPhaseTable.end(), 0);
+
       std::stringstream ss(tInput);
       std::string token;
-
-      int tPhase = 0;
-      while (std::getline(ss, token, ' '))
+      size_t tPhase = 0;
+      while (ss >> token)
       {
-         token = trim(token); // remove whitespace
-         if (!token.empty())
+         token = trim(token); // remove surrounding whitespace
+         if (token.empty())
+            continue;
+         if (tPhase >= gPhaseTable.size())
+            break; // ignore extra values
+         try
          {
-            tPhaseTable[tPhase] = static_cast<int>(std::stoul(token));
-            tPhase++;
+            gPhaseTable[tPhase] = static_cast<int>(std::stoul(token));
          }
+         catch (const std::exception &)
+         {
+            // Invalid token: leave as 0 and continue
+            gPhaseTable[tPhase] = 0;
+         }
+         ++tPhase;
       }
-      return tPhaseTable;
+
+      if( tPhase != std::pow(2,gNumGeoms ) )
+      {
+         std::cout << "Incorrect number of phases entered. Expected " << std::pow(2,gNumGeoms) << " but got " << tPhase << ". Try again\n";
+         get_phase_table_user_input();
+      }
    }
 
    LS load_LS_from_string( std::string aInput )
@@ -412,68 +439,50 @@ namespace moris::GUI
       std::vector<double> tXVals = linspace(tXLB, tXUB, NUM_POINTS);
       std::vector<double> tYVals = linspace(tZLB, tZUB, NUM_POINTS);
 
-      // Draw the surface
+      // Draw the surface, splitting triangle strips when vertices don't match sign condition
       for (int i = 0; i < NUM_POINTS - 1; i++)
       {
-         glBegin(GL_TRIANGLE_STRIP);
+         bool stripOpen = false;
+         double x0 = tXVals[i];
+         double x1 = tXVals[i + 1];
+
          for (int j = 0; j < NUM_POINTS; j++)
          {
-            // Compute coordinates from LS function
-            double x = tXVals[i];
             double z = tYVals[j]; // Since OpenGL Y is up, we use Z here. LS function is still (x,y)
-            double y = eval_LS(aLS, x, z);
+            double y0 = eval_LS(aLS, x0, z);
+            double y1 = eval_LS(aLS, x1, z);
 
-            // Compute normal
-            // double nx = -gradX(x, z);
-            // double ny = 1.0;
-            // double nz = -gradZ(x, z);
-            // double length = sqrt(nx * nx + ny * ny + nz * nz);
-            // nx /= length;
-            // ny /= length;
-            // nz /= length;
+            bool valid0 = !((aSign == PHASE::POSITIVE && y0 < 0) || (aSign == PHASE::NEGATIVE && y0 > 0));
+            bool valid1 = !((aSign == PHASE::POSITIVE && y1 < 0) || (aSign == PHASE::NEGATIVE && y1 > 0));
 
-            // Check sign condition
-            if ((aSign == PHASE::POSITIVE && y < 0) || (aSign == PHASE::NEGATIVE && y > 0))
+            // If both vertices are valid, emit them into the strip. Otherwise close the current strip.
+            if (valid0 && valid1)
             {
-               y = 0.0f;                 // Clamp to zero level-set
-               glColor3d(0.0, 0.0, 0.0); // Black color for clamped points (to hide plot)
+               if (!stripOpen)
+               {
+                  glBegin(GL_TRIANGLE_STRIP);
+                  stripOpen = true;
+               }
+               // Set color for this geometry
+               glColor3d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2]);
+               // Emit the two vertices for this column
+               glVertex3d(x0, y0, z);
+               glVertex3d(x1, y1, z);
             }
             else
             {
-               // Set color, normal, texture coord, and vertex
-               glColor3d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2]);
+               if (stripOpen)
+               {
+                  glEnd();
+                  stripOpen = false;
+               }
             }
-            // glNormal3d(nx, ny, nz);
-            glVertex3d(x, y, z);
-
-            // Repeat for the next point
-            x = tXVals[i + 1];
-            z = tYVals[j];
-            y = eval_LS(aLS, x, z);
-
-            // nx = -gradX(x, z);
-            // ny = 1.0;
-            // nz = -gradZ(x, z);
-            // length = sqrt(nx * nx + ny * ny + nz * nz);
-            // nx /= length;
-            // ny /= length;
-            // nz /= length;
-
-            // Check sign condition
-            if ((aSign == PHASE::POSITIVE && y < 0) || (aSign == PHASE::NEGATIVE && y > 0))
-            {
-               y = 0.0f;                 // Clamp to zero level-set
-               glColor3d(0.0, 0.0, 0.0); // Black color for clamped points (to hide plot)
-            }
-            else
-            {
-               // Set color, normal, texture coord, and vertex
-               glColor3d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2]);
-            }
-            // glNormal3d(nx, ny, nz);
-            glVertex3d(x, y, z);
          }
-         glEnd();
+         if (stripOpen)
+         {
+            glEnd();
+            stripOpen = false;
+         }
       }
 
       glPopMatrix();
@@ -657,7 +666,7 @@ namespace moris::GUI
       else if (ch == 'p' || ch == 'P')
       {
          // Get user input for phase table
-         gPhaseTable = get_phase_table_user_input();
+         get_phase_table_user_input();
       }
       else if (ch == '0')
       {
@@ -702,54 +711,6 @@ namespace moris::GUI
       else if (ch == '_')
       {
          set_active_phases_from_phase_index(0); // since there's no F0 key
-      }
-      else if (ch == 129) // F1 key
-      {
-         set_active_phases_from_phase_index(1);
-      }
-      else if (ch == 130) // F2 key
-      {
-         set_active_phases_from_phase_index(2);
-      }
-      else if (ch == 131) // F3 key
-      {
-         set_active_phases_from_phase_index(3);
-      }
-      else if (ch == 132) // F4 key
-      {
-         set_active_phases_from_phase_index(4);
-      }
-      else if (ch == 133) // F5 key
-      {
-         set_active_phases_from_phase_index(5);
-      }
-      else if (ch == 134) // F6 key
-      {
-         set_active_phases_from_phase_index(6);
-      }
-      else if (ch == 135) // F7 key
-      {
-         set_active_phases_from_phase_index(7);
-      }
-      else if (ch == 136) // F8 key
-      {
-         set_active_phases_from_phase_index(8);
-      }
-      else if (ch == 137) // F9 key
-      {
-         set_active_phases_from_phase_index(9);
-      }
-      else if (ch == 138) // F10 key
-      {
-         set_active_phases_from_phase_index(10);
-      }
-      else if (ch == 139) // F11 key
-      {
-         set_active_phases_from_phase_index(11);
-      }
-      else if (ch == 140) // F12 key
-      {
-         set_active_phases_from_phase_index(12);
       }
       else if (ch =='d' || ch == 'D')
       {
@@ -823,6 +784,54 @@ namespace moris::GUI
     */
    void special(int key, int x, int y)
    {
+      if (key == GLUT_KEY_F1) // F1 key
+      {
+         set_active_phases_from_phase_index(1);
+      }
+      else if (key == GLUT_KEY_F2) // F2 key
+      {
+         set_active_phases_from_phase_index(2);
+      }
+      else if (key == GLUT_KEY_F3) // F3 key
+      {
+         set_active_phases_from_phase_index(3);
+      }
+      else if (key == GLUT_KEY_F4) // F4 key
+      {
+         set_active_phases_from_phase_index(4);
+      }
+      else if (key == GLUT_KEY_F5) // F5 key
+      {
+         set_active_phases_from_phase_index(5);
+      }
+      else if (key == GLUT_KEY_F6) // F6 key
+      {
+         set_active_phases_from_phase_index(6);
+      }
+      else if (key == GLUT_KEY_F7) // F7 key
+      {
+         set_active_phases_from_phase_index(7);
+      }
+      else if (key == GLUT_KEY_F8) // F8 key
+      {
+         set_active_phases_from_phase_index(8);
+      }
+      else if (key == GLUT_KEY_F9) // F9 key
+      {
+         set_active_phases_from_phase_index(9);
+      }
+      else if (key == GLUT_KEY_F10) // F10 key
+      {
+         set_active_phases_from_phase_index(10);
+      }
+      else if (key == GLUT_KEY_F11) // F11 key
+      {
+         set_active_phases_from_phase_index(11);
+      }
+      else if (key == GLUT_KEY_F12) // F12 key
+      {
+         set_active_phases_from_phase_index(12);
+      }
    }
 
    // Function for basic animations
