@@ -48,11 +48,11 @@ namespace moris::GUI
 
    // FIXME: change names to global convention
    double tAsp = 16.0 / 9.0; // Aspect ratio
-   int tFOV = 110;           // Field of view for perspective
-   int tMode = 0;            // perspective mode switcher
+   int gFOV = 110;           // Field of view for perspective
+   int gMode = 0;            // perspective mode switcher
    double tDim = 1.7;        // Size of the world
-   int tPhi = 20;            // Elevation of view angle
-   int tTheta = 0;           // Azimuth of view angle
+   int gPhi = 20;            // Elevation of view angle
+   int gTheta = 0;           // Azimuth of view angle
 
    //-----------------------------------------------------------
    // Global lighting variables
@@ -126,6 +126,17 @@ namespace moris::GUI
        {0.5, 0.5, 0.5},
        {1.0, 0.5, 0.0},
        {0.5, 0.0, 0.5}};
+
+   //-----------------------------------------------------------
+   // Global viewport variables
+   //-----------------------------------------------------------
+   int gWidth = 1920 / RES;  // Main window width
+   int gHeight = 1080 / RES; // Main window height
+
+   int gProjWidth = 0.3 * gWidth;   // Projection viewport width
+   int gProjHeight = 0.3 * gHeight; // Projection viewport height
+
+   //-----------------------------------------------------------------------
 
    // For generating sampling points
    std::vector<double> linspace(double start, double end, int num)
@@ -583,12 +594,19 @@ namespace moris::GUI
       // Clear the image
       glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+      //-----------------------------------------------------------
+      // Viewport 1
+      //-----------------------------------------------------------
+
+      // Main viewport
+      glViewport(0, 0, gWidth, gHeight);
+
       // Reset transformations
       glLoadIdentity();
 
       // Apply rotations
-      glRotated(tPhi, 1.0, 0.0, 0.0);
-      glRotated(tTheta, 0.0, 1.0, 0.0);
+      glRotated(gPhi, 1.0, 0.0, 0.0);
+      glRotated(gTheta, 0.0, 1.0, 0.0);
 
       //  Flat or smooth shading
       glShadeModel(tSmooth ? GL_SMOOTH : GL_FLAT);
@@ -640,7 +658,7 @@ namespace moris::GUI
       {
       case 2:
       {
-         for (int iG = 0; iG < MAX_GEOMETRIES; iG++)
+         for (int iG = 0; iG < gNumGeoms; iG++)
          {
             drawLS2D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG);
          }
@@ -648,7 +666,7 @@ namespace moris::GUI
       }
       case 3:
       {
-         for (int iG = 0; iG < MAX_GEOMETRIES; iG++)
+         for (int iG = 0; iG < gNumGeoms; iG++)
          {
             drawLS3D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG);
          }
@@ -692,6 +710,60 @@ namespace moris::GUI
       // Print phase table for user reference
       print_phase_table();
 
+      //-----------------------------------------------------------
+      // Viewport 2 (projection, top-down view)
+      //-----------------------------------------------------------
+
+      // Main viewport
+      glViewport(0, 0, gWidth, gHeight);
+
+      // Projection viewport (top down view)
+      glViewport(gWidth * 0.7, gHeight * 0.7, gProjWidth, gProjHeight);
+      glDisable(GL_LIGHTING);
+
+      // Reset transformations
+      glLoadIdentity();
+
+      // Set top-down view
+      glRotated(90, 1.0, 0.0, 0.0);
+
+      // Set the plot to be centered at the middle of the domain
+      glTranslated((-0.5 * (tXLB + tXUB)), 0.0, (-0.5 * (tZLB + tZUB)));
+
+      // Plot the level-set geometries again, but this time we choose the color based on the phase table
+      switch (gSpatialDim)
+      {
+      case 2:
+      {
+         for (int iG = 0; iG < gNumGeoms; iG++)
+         {
+            drawLS2D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG);
+         }
+         break;
+      }
+      case 3:
+      {
+         for (int iG = 0; iG < gNumGeoms; iG++)
+         {
+            drawLS3D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG);
+         }
+         break;
+      }
+      default:
+      {
+         Fatal("Unsupported spatial dimension %d", gSpatialDim);
+      }
+      }
+
+      // Print xtk temp label
+      glColor3f(1.0, 1.0, 1.0);
+      glWindowPos2i(gWidth * 0.82, gHeight * 0.73);
+      Print("XTK Temp Result");
+
+      //-----------------------------------------------------------
+      // Clean up
+      //-----------------------------------------------------------
+
       // Error check
       ErrCheck("display");
 
@@ -703,25 +775,28 @@ namespace moris::GUI
    /*
     * This function is called by GLUT when the window is resized
     */
-   void reshape(int width, int height)
+   void reshape(int aWidth, int aHeight)
    {
-      // Avoid divide by zero
-      tAsp = (height > 0) ? (double)width / height : 1;
+      // Set the main viewport size
+      gWidth = aWidth;
+      gHeight = aHeight;
 
-      glViewport(0, 0, width, height);
+      // Set the projection viewport size
+      gProjWidth = 0.3 * gWidth;
+      gProjHeight = 0.3 * gHeight;
 
       // Apply projection based on the current mode
-      if (tMode == 0)
+      if (gMode == 0)
          Project(0, tAsp, tDim);
       else
-         Project(tFOV, tAsp, tDim);
+         Project(gFOV, tAsp, tDim);
    }
 
    void key(unsigned char ch, int x, int y)
    {
       if (ch == 'm' || ch == 'M')
       {
-         tMode = 1 - tMode;
+         gMode = 1 - gMode;
       }
       else if (ch == 'l' || ch == 'L')
       {
@@ -969,30 +1044,30 @@ namespace moris::GUI
          int deltaY = y - tMouseY;
 
          // Update angles based on mouse movement
-         tTheta += deltaX * 0.1; // Horizontal movement controls azimuth (yaw)
-         tPhi += deltaY * 0.1;   // Vertical movement controls elevation (pitch)
+         gTheta += deltaX * 0.1; // Horizontal movement controls azimuth (yaw)
+         gPhi += deltaY * 0.1;   // Vertical movement controls elevation (pitch)
 
          // Keep phi within reasonable bounds
-         if (tPhi > 89)
-            tPhi = 89;
-         if (tPhi < -89)
-            tPhi = -89;
+         if (gPhi > 89)
+            gPhi = 89;
+         if (gPhi < -89)
+            gPhi = -89;
 
          // Wrap theta around 360 degrees
-         if (tTheta > 360)
-            tTheta -= 360;
-         if (tTheta < 0)
-            tTheta += 360;
+         if (gTheta > 360)
+            gTheta -= 360;
+         if (gTheta < 0)
+            gTheta += 360;
 
          // Store current mouse position
          tMouseX = x;
          tMouseY = y;
 
          // Apply projection based on the current mode
-         if (tMode == 0)
+         if (gMode == 0)
             Project(0, tAsp, tDim);
          else
-            Project(tFOV, tAsp, tDim);
+            Project(gFOV, tAsp, tDim);
          glutPostRedisplay();
       }
    }
@@ -1038,10 +1113,10 @@ namespace moris::GUI
          }
 
          // Update the projection
-         if (tMode == 0)
+         if (gMode == 0)
             Project(0, tAsp, tDim);
          else
-            Project(tFOV, tAsp, tDim);
+            Project(gFOV, tAsp, tDim);
 
          glutPostRedisplay();
          return;
