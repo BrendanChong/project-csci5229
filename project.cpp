@@ -218,10 +218,10 @@ namespace moris::GUI
       // Reset active phases
       reset_active_phases();
 
-      // Get all the indices for the given phase
+      // Get all the bitset indices for the given phase
       std::vector<int> tIndices = get_indices_for_phase(aIndex);
 
-      // Loop through the indices and convert to binary to set active regions for each geometry
+      // Loop through the bitsets and convert to binary to set active regions for each geometry
       for(int iIndex : tIndices)
       {
          std::vector<int> tBinary = int_to_binary(iIndex); // Get the geometry signs for this index
@@ -344,17 +344,8 @@ namespace moris::GUI
       return tPhaseTable;
    }
 
-   LS get_LS_user_input()
+   LS load_LS_from_string( std::string aInput )
    {
-      // Print that we are asking for user input
-      glWindowPos2i(5, 5);
-      Print("Enter a function of %s for the level-set function in the console. To be stored as Geometry %d", gSpatialDim == 2 ? "(x,y)" : "(x,y,z)", gActiveGeometry);
-
-      // Get user input from console
-      std::string tInput;
-      std::cout << (gSpatialDim == 2 ? "Enter a level-set function of (x,y):" : "Enter a level-set function of (x,y,z):");
-      std::getline(std::cin, tInput);
-
       // Define LS variables, add them to exprtk symbol table
       exprtk::symbol_table<double> tSymbolTable;
       tSymbolTable.add_variable("x", gX);
@@ -368,12 +359,24 @@ namespace moris::GUI
 
       // Parse the user input
       exprtk::parser<double> tParser;
-      if (!tParser.compile(tInput, tExpression))
+      if (!tParser.compile(aInput, tExpression))
       {
-         Fatal("Error: Failed to parse expression: %s", tInput.c_str());
+         Fatal("Error: Failed to parse expression: %s", aInput.c_str());
       }
+   }
 
-      return tExpression;
+   LS get_LS_user_input()
+   {
+      // Print that we are asking for user input
+      glWindowPos2i(5, 5);
+      Print("Enter a function of %s for the level-set function in the console. To be stored as Geometry %d", gSpatialDim == 2 ? "(x,y)" : "(x,y,z)", gActiveGeometry);
+
+      // Get user input from console
+      std::string tInput;
+      std::cout << (gSpatialDim == 2 ? "Enter a level-set function of (x,y):" : "Enter a level-set function of (x,y,z):");
+      std::getline(std::cin, tInput);
+
+      return load_LS_from_string( tInput );
    }
 
    double eval_LS(LS aLS, double aX, double aY, double aZ = 0.0f)
@@ -746,6 +749,19 @@ namespace moris::GUI
       {
          set_active_phases_from_phase_index(12);
       }
+      else if (ch =='d' || ch == 'D')
+      {
+         // Delete the current active geometry
+         // Shift all geometries after it down by one
+         for (int iG = gActiveGeometry; iG < gNumGeoms - 1; iG++)
+         {
+            gLevelSets[iG] = gLevelSets[iG + 1];
+            gGeomsPhaseToPlot[iG] = gGeomsPhaseToPlot[iG + 1];
+         }
+         gNumGeoms--;
+         gLevelSets[gNumGeoms] = LS(); // Reset last geometry
+         gGeomsPhaseToPlot[gNumGeoms] = PHASE::NONE; // Reset last geometry's phase to plot
+      }
       else if (ch == '+')
       {
          set_all_active_phases_to_positive();
@@ -762,8 +778,6 @@ namespace moris::GUI
             gGeomsPhaseToPlot[iG] = PHASE::ALL;
          }
       }
-      else if (ch == 27) // Escape key
-         exit(0);
       else if (ch == 13) // Enter key
       {
          // Get user input for the current active geometry
@@ -772,6 +786,23 @@ namespace moris::GUI
          // Set to plot this geometry
          gGeomsPhaseToPlot[gActiveGeometry] = PHASE::ALL;
       }
+      else if( ch == '/' || ch == '?')
+      {
+         // Load demo level-set functions
+         gLevelSets[0] = load_LS_from_string("sin(0.43*x)+cos(y)-1");
+         gLevelSets[1] = load_LS_from_string("sin(x)-1.2*cos(y)");
+         gLevelSets[2] = load_LS_from_string("x^2+y^2-1");
+         gNumGeoms = 3;
+         
+         // Set to plot all geometries
+         for( int iG = 0; iG < gNumGeoms; iG++ )
+         {
+            gGeomsPhaseToPlot[iG] = PHASE::ALL;
+         }
+      }
+      else if (ch == 27) // Escape key
+         exit(0);
+
 
       // If a number key was pressed, update the active phases to plot to only plot that geometry
       if( ch == '0' || ch == '1' || ch == '2' || ch == '3' || ch == '4' ||
