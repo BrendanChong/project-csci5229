@@ -161,7 +161,7 @@ namespace moris::GUI
    std::vector<int> get_indices_for_phase(int aPhase)
    {
       std::vector<int> indices;
-      for (int i = 0; i < gPhaseTable.size(); i++)
+      for (size_t i = 0; i < gPhaseTable.size(); i++)
       {
          if (gPhaseTable[i] == aPhase)
          {
@@ -487,6 +487,97 @@ namespace moris::GUI
       ErrCheck("drawLS");
    }
 
+   void print_phase_table()
+   {
+      if (gNumGeoms == 0)
+      {
+         return;
+      }
+
+      // number of columns (geometries) to display
+      int tNumCols = std::max(1, gNumGeoms);
+
+      // helper: measure pixel length of an UTF-8/ASCII string
+      auto tPixelLength = [&](const std::string &s) -> int
+      {
+#ifdef GLUT_BITMAP_LENGTH
+         void *tFont = GLUT_BITMAP_HELVETICA_12;
+
+         // some GLUT variations expose glutBitmapLength
+         return glutBitmapLength(tFont, reinterpret_cast<const unsigned char *>(s.c_str()));
+#else
+         // fallback estimate: assume monospace ~8 px per char
+         return static_cast<int>(s.size()) * 8;
+#endif
+      };
+
+      // geometry column labels, build with fixed column spacing so columns align
+      const int tColSpacingPixels = 40; // pixels between column centers
+      // compute table and placement using a left margin so table sits at top-left
+      const int tLeftX = 20; // left margin of the whole table
+      int tTableWidth = tNumCols * tColSpacingPixels;
+
+      // estimate width needed for the "Phase N | " label using the largest phase number
+      int tnPhases = 1 << tNumCols;
+      std::string samplePhaseLabel = "Phase " + std::to_string(std::max(0, tnPhases - 1)) + " | ";
+      int phaseLabelW = tPixelLength(samplePhaseLabel);
+
+      // table's X start (leave space for the phase label on the left)
+      int tColsX = tLeftX + phaseLabelW + 10; // 10 px gap after phase label
+
+      // draw each column label centered in its column cell
+      int tColCenterX;
+      for (int j = 0; j < tNumCols; ++j)
+      {
+         std::string tPhaseKey = std::to_string(j);
+         int tKeyWidth = tPixelLength(tPhaseKey);
+         tColCenterX = tColsX + j * tColSpacingPixels + (tColSpacingPixels / 2);
+         int xpos = std::max(0, tColCenterX - tKeyWidth / 2);
+         glWindowPos2i(xpos, 940);
+         Print(tPhaseKey.c_str());
+      }
+
+      // Title
+      std::string tTitle = "PHASE TABLE";
+      std::string tDivider = "--------------------------------";
+      glWindowPos2i(tPixelLength(tDivider) / 2, 960);
+      Print(tTitle.c_str());
+
+      // divider line
+      glWindowPos2i(tLeftX, 920);
+      Print("--------------------------------");
+
+      // right-side value placement (to the right of the table)
+      int tValueX = tColsX + tTableWidth + 10;
+
+      for (int i = 0; i < tnPhases; ++i)
+      {
+         int y = 900 - i * 20;
+
+         // draw phase label on the left (use baseX left margin)
+         std::string tPhaseKey = "Phase " + std::to_string(i) + " | ";
+         glWindowPos2i(tLeftX, y);
+         Print(tPhaseKey.c_str());
+
+         // draw each symbol at its column center
+         for (int j = 0; j < tNumCols; ++j)
+         {
+            unsigned tBit = (static_cast<unsigned>(i) >> (tNumCols - 1 - j)) & 1u;
+            std::string tKey(1, tBit ? '+' : '-');
+            tColCenterX = tColsX + j * tColSpacingPixels + (tColSpacingPixels / 2);
+            int tKeyWidth = tPixelLength(tKey);
+            int tKeyX = std::max(0, tColCenterX - tKeyWidth / 2);
+            glWindowPos2i(tKeyX, y);
+            Print(tKey.c_str());
+         }
+
+         // draw the phase-table value to the right
+         std::string tPhaseIndex = std::to_string(gPhaseTable[i]);
+         glWindowPos2i(tValueX, y);
+         Print(tPhaseIndex.c_str());
+      }
+   }
+
    void display()
    {
       // Clear the image
@@ -599,29 +690,7 @@ namespace moris::GUI
             tTheta, tPhi, tDim, tLight ? "On" : "Off", tSmooth ? "Smooth" : "Flat");
 
       // Print phase table for user reference
-      glWindowPos2i(80, 980);
-      Print("\t\t\t\tPhase Table for Current Configuration");
-      glWindowPos2i(130, 960);
-      Print("Geometry Number");
-      glWindowPos2i(130, 940);
-      Print("0\t\t\t\t\t1\t\t\t\t\t2");
-      glWindowPos2i(5, 920);
-      Print("--------------------------------");
-      for (int i = 0; i < std::pow(2, gNumGeoms); i++)
-      {
-         glWindowPos2i(5, 900 - i * 20);
-         std::string tGeomPhases = "";
-         for (int j = 0; j < gNumGeoms; j++)
-         {
-            // Extract MSB-first bit for geometry j
-            unsigned tBit = (static_cast<unsigned>(i) >> (gNumGeoms - 1 - j)) & 1u;
-            tGeomPhases += "\t\t\t\t\t";
-
-            // Convert bit to +/-
-            tGeomPhases += (tBit ? "+" : "-");
-         }
-         Print("Phase %d\t\t|\t\t%s\t\t|\t\t%d", i, tGeomPhases.c_str(), gPhaseTable[i]);
-      }
+      print_phase_table();
 
       // Error check
       ErrCheck("display");
@@ -679,6 +748,9 @@ namespace moris::GUI
             gLevelSets[gNumGeoms] = get_LS_user_input();
             gGeomsPhaseToPlot[gNumGeoms] = PHASE::ALL; // Default to plot all phases
             gNumGeoms++;
+
+            // reset phase table
+            std::iota(gPhaseTable.begin(), gPhaseTable.end(), 0);
          }
          else
          {
@@ -746,6 +818,15 @@ namespace moris::GUI
          gNumGeoms--;
          gLevelSets[gNumGeoms] = LS();               // Reset last geometry
          gGeomsPhaseToPlot[gNumGeoms] = PHASE::NONE; // Reset last geometry's phase to plot
+
+         // reset phase table
+         std::iota(gPhaseTable.begin(), gPhaseTable.end(), 0);
+
+         // Plot all phases
+         for (int iG = 0; iG < gNumGeoms; iG++)
+         {
+            gGeomsPhaseToPlot[iG] = PHASE::ALL;
+         }
       }
       else if (ch == '+')
       {
@@ -758,7 +839,7 @@ namespace moris::GUI
       else if (ch == 32) // space bar
       {
          // Plot all phases
-         for (int iG = 0; iG < MAX_GEOMETRIES; iG++)
+         for (int iG = 0; iG < gNumGeoms; iG++)
          {
             gGeomsPhaseToPlot[iG] = PHASE::ALL;
          }
