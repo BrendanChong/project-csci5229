@@ -950,7 +950,7 @@ int main(int argc, char *argv[])
    //  Request double buffered true color window without Z-buffer
    glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE | GLUT_DEPTH);
    //  Create window
-   glutCreateWindow("Brendan Chong - Sloshing box");
+   glutCreateWindow("Brendan Chong - MORIS Phase Assignment GUI");
 #ifdef USEGLEW
    //  Initialize GLEW
    if (glewInit() != GLEW_OK)
