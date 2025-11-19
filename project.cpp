@@ -24,7 +24,7 @@
 #define RES 1
 #endif
 
-#define NUM_POINTS 100    // number of points in each direction for the grid
+#define NUM_POINTS 100   // number of points in each direction for the grid
 #define MAX_GEOMETRIES 5 // Maximum number of geometries
 
 using LS = exprtk::expression<double>; // Level set function type - returns phi(x,y,z)
@@ -48,11 +48,11 @@ namespace moris::GUI
 
    // FIXME: change names to global convention
    double tAsp = 16.0 / 9.0; // Aspect ratio
-   int tFOV = 110;          // Field of view for perspective
-   int tMode = 0;           // perspective mode switcher
+   int tFOV = 110;           // Field of view for perspective
+   int tMode = 0;            // perspective mode switcher
    double tDim = 3.5;        // Size of the world
-   int tPhi = 20;           // Elevation of view angle
-   int tTheta = 0;          // Azimuth of view angle
+   int tPhi = 20;            // Elevation of view angle
+   int tTheta = 0;           // Azimuth of view angle
 
    //-----------------------------------------------------------
    // Global lighting variables
@@ -69,7 +69,7 @@ namespace moris::GUI
    int gDiffuse = 50;  // Diffuse intensity (%)
    int gSpecular = 5;  // Specular intensity (%)
    int gShininess = 0; // Shininess (power of two)
-   double tShiny = 1;   // Shininess (value)
+   double tShiny = 1;  // Shininess (value)
    int tZeta = 90;     // Light azimuth
    float tYLight = 5;  // Elevation of light
 
@@ -89,23 +89,24 @@ namespace moris::GUI
    //-----------------------------------------------------------
    // Global LS variables
    //-----------------------------------------------------------
-   int gSpatialDim = 2;                       // Spatial dimension (2D/3D)
+   int gSpatialDim = 2;                        // Spatial dimension (2D/3D)
    int tAxes = 1;                              // Display axes or not
-   double tXLB = -1.0;                          // x lower bound
-   double tXUB = 1.0;                           // x upper bound
-   double tZLB = -1.0;                          // z lower bound
-   double tZUB = 1.0;                           // z upper bound
-   double gX, gY, gZ;                           // Global coordinates for LS evaluation
+   double tXLB = -1.0;                         // x lower bound
+   double tXUB = 1.0;                          // x upper bound
+   double tZLB = -1.0;                         // z lower bound
+   double tZUB = 1.0;                          // z upper bound
+   double gX, gY, gZ;                          // Global coordinates for LS evaluation
    std::vector<LS> gLevelSets(MAX_GEOMETRIES); // Vector of level-set functions
-   int gActiveGeometry = 0;                   // Currently active geometry for user input
-   int gNumGeoms = 0;                         // Number of geometries defined
+   int gActiveGeometry = 0;                    // Currently active geometry for user input
+   int gNumGeoms = 0;                          // Number of geometries defined
 
    //-----------------------------------------------------------
    // Global phase variables
    //-----------------------------------------------------------
 
    // Phase table: initialize with values 0,1,2,...,(2^MAX_GEOMETRIES)-1
-   std::vector<int> gPhaseTable = [](){
+   std::vector<int> gPhaseTable = []()
+   {
       int n = 1 << MAX_GEOMETRIES; // 2^MAX_GEOMETRIES (integer shift avoids <cmath>)
       std::vector<int> v(n);
       std::iota(v.begin(), v.end(), 0);
@@ -155,8 +156,8 @@ namespace moris::GUI
    }
 
    /*
-   * Gets the indices of the phase table that correspond to a given phase
-   */
+    * Gets the indices of the phase table that correspond to a given phase
+    */
    std::vector<int> get_indices_for_phase(int aPhase)
    {
       std::vector<int> indices;
@@ -187,14 +188,14 @@ namespace moris::GUI
    {
       for (int iG = 0; iG < MAX_GEOMETRIES; iG++)
       {
-         if( aBinary[iG] == 1)
+         if (aBinary[iG] == 1)
          {
             // Set to plot positive phase
-            if(gGeomsPhaseToPlot[iG] == PHASE::NONE)
+            if (gGeomsPhaseToPlot[iG] == PHASE::NONE)
             {
                gGeomsPhaseToPlot[iG] = PHASE::POSITIVE;
             }
-            else if(gGeomsPhaseToPlot[iG] == PHASE::NEGATIVE)
+            else if (gGeomsPhaseToPlot[iG] == PHASE::NEGATIVE)
             {
                gGeomsPhaseToPlot[iG] = PHASE::ALL;
             }
@@ -202,11 +203,11 @@ namespace moris::GUI
          else
          {
             // Set to plot negative phase
-            if(gGeomsPhaseToPlot[iG] == PHASE::NONE)
+            if (gGeomsPhaseToPlot[iG] == PHASE::NONE)
             {
                gGeomsPhaseToPlot[iG] = PHASE::NEGATIVE;
             }
-            else if(gGeomsPhaseToPlot[iG] == PHASE::POSITIVE)
+            else if (gGeomsPhaseToPlot[iG] == PHASE::POSITIVE)
             {
                gGeomsPhaseToPlot[iG] = PHASE::ALL;
             }
@@ -218,7 +219,7 @@ namespace moris::GUI
     * Gets all the bitsets from the phase table that are assigned to a given phase index,
     * then sets the active geometry phases to plot accordingly
     */
-   void set_active_phases_from_phase_index( int aIndex )
+   void set_active_phases_from_phase_index(int aIndex)
    {
       // Reset active phases
       reset_active_phases();
@@ -227,7 +228,7 @@ namespace moris::GUI
       std::vector<int> tIndices = get_indices_for_phase(aIndex);
 
       // Loop through the bitsets and convert to binary to set active regions for each geometry
-      for(int iIndex : tIndices)
+      for (int iIndex : tIndices)
       {
          std::vector<int> tBinary = int_to_binary(iIndex, gNumGeoms); // Get the geometry signs for this index
 
@@ -242,21 +243,21 @@ namespace moris::GUI
    {
       for (int iG = 0; iG < MAX_GEOMETRIES; iG++)
       {
-         if( gGeomsPhaseToPlot[iG] != PHASE::NONE )
+         if (gGeomsPhaseToPlot[iG] != PHASE::NONE)
          {
             gGeomsPhaseToPlot[iG] = PHASE::NEGATIVE;
          }
       }
    }
 
-      /**
+   /**
     * Function to see the positive region for all currently active geometries
     */
    void set_all_active_phases_to_positive()
    {
       for (int iG = 0; iG < MAX_GEOMETRIES; iG++)
       {
-         if( gGeomsPhaseToPlot[iG] != PHASE::NONE )
+         if (gGeomsPhaseToPlot[iG] != PHASE::NONE)
          {
             gGeomsPhaseToPlot[iG] = PHASE::POSITIVE;
          }
@@ -323,10 +324,6 @@ namespace moris::GUI
 
    void get_phase_table_user_input()
    {
-      // Prompt for user input
-      glWindowPos2i(5, 5);
-      Print("Enter phase numbers for each geometry separated by commas or spaces in the console.");
-
       // Read a full line from console
       std::string tInput;
       std::cout << "Enter phase numbers for each geometry (comma or space separated): ";
@@ -340,7 +337,7 @@ namespace moris::GUI
       }
 
       // Initialize phase table to default 0 values, then overwrite with user input
-      std::fill(gPhaseTable.begin(), gPhaseTable.end(), 0);
+      std::fill(gPhaseTable.begin(), gPhaseTable.end(), -1);
 
       std::stringstream ss(tInput);
       std::string token;
@@ -358,20 +355,20 @@ namespace moris::GUI
          }
          catch (const std::exception &)
          {
-            // Invalid token: leave as 0 and continue
-            gPhaseTable[tPhase] = 0;
+            // Invalid token: leave as invalid phase and continue
+            gPhaseTable[tPhase] = -1;
          }
          ++tPhase;
       }
 
-      if( tPhase != std::pow(2,gNumGeoms ) )
+      if (tPhase != std::pow(2, gNumGeoms))
       {
-         std::cout << "Incorrect number of phases entered. Expected " << std::pow(2,gNumGeoms) << " but got " << tPhase << ". Try again\n";
+         std::cout << "Incorrect number of phases entered. Expected " << std::pow(2, gNumGeoms) << " but got " << tPhase << ". Try again\n";
          get_phase_table_user_input();
       }
    }
 
-   LS load_LS_from_string( std::string aInput )
+   LS load_LS_from_string(std::string aInput)
    {
       // Define LS variables, add them to exprtk symbol table
       exprtk::symbol_table<double> tSymbolTable;
@@ -405,7 +402,7 @@ namespace moris::GUI
       std::cout << (gSpatialDim == 2 ? "Enter a level-set function of (x,y):" : "Enter a level-set function of (x,y,z):");
       std::getline(std::cin, tInput);
 
-      return load_LS_from_string( tInput );
+      return load_LS_from_string(tInput);
    }
 
    double eval_LS(LS aLS, double aX, double aY, double aZ = 0.0f)
@@ -590,16 +587,41 @@ namespace moris::GUI
          glRasterPos3d(1, 0, 0);
          Print("X");
          glRasterPos3d(0, 1, 0);
-         Print("Y");
-         glRasterPos3d(0, 0, 1);
          Print("Z");
+         glRasterPos3d(0, 0, 1);
+         Print("Y");
       }
 
       // Display settings
       glColor3f(1.0, 1.0, 1.0);
-      glWindowPos2i(5, 100);
+      glWindowPos2i(5, 25);
       Print("(th,ph)=%d,%d  Dim=%.1f Light=%s Lighting type=%s",
             tTheta, tPhi, tDim, tLight ? "On" : "Off", tSmooth ? "Smooth" : "Flat");
+
+      // Print phase table for user reference
+      glWindowPos2i(80, 980);
+      Print("\t\t\t\tPhase Table for Current Configuration");
+      glWindowPos2i(130, 960);
+      Print("Geometry Number");
+      glWindowPos2i(130, 940);
+      Print("0\t\t\t\t\t1\t\t\t\t\t2");
+      glWindowPos2i(5, 920);
+      Print("--------------------------------");
+      for (int i = 0; i < std::pow(2, gNumGeoms); i++)
+      {
+         glWindowPos2i(5, 900 - i * 20);
+         std::string tGeomPhases = "";
+         for (int j = 0; j < gNumGeoms; j++)
+         {
+            // Extract MSB-first bit for geometry j
+            unsigned tBit = (static_cast<unsigned>(i) >> (gNumGeoms - 1 - j)) & 1u;
+            tGeomPhases += "\t\t\t\t\t";
+
+            // Convert bit to +/-
+            tGeomPhases += (tBit ? "+" : "-");
+         }
+         Print("Phase %d\t\t|\t\t%s\t\t|\t\t%d", i, tGeomPhases.c_str(), gPhaseTable[i]);
+      }
 
       // Error check
       ErrCheck("display");
@@ -712,7 +734,7 @@ namespace moris::GUI
       {
          set_active_phases_from_phase_index(0); // since there's no F0 key
       }
-      else if (ch =='d' || ch == 'D')
+      else if (ch == 'd' || ch == 'D')
       {
          // Delete the current active geometry
          // Shift all geometries after it down by one
@@ -722,7 +744,7 @@ namespace moris::GUI
             gGeomsPhaseToPlot[iG] = gGeomsPhaseToPlot[iG + 1];
          }
          gNumGeoms--;
-         gLevelSets[gNumGeoms] = LS(); // Reset last geometry
+         gLevelSets[gNumGeoms] = LS();               // Reset last geometry
          gGeomsPhaseToPlot[gNumGeoms] = PHASE::NONE; // Reset last geometry's phase to plot
       }
       else if (ch == '+')
@@ -736,7 +758,7 @@ namespace moris::GUI
       else if (ch == 32) // space bar
       {
          // Plot all phases
-         for( int iG = 0; iG < MAX_GEOMETRIES; iG++ )
+         for (int iG = 0; iG < MAX_GEOMETRIES; iG++)
          {
             gGeomsPhaseToPlot[iG] = PHASE::ALL;
          }
@@ -749,27 +771,36 @@ namespace moris::GUI
          // Set to plot this geometry
          gGeomsPhaseToPlot[gActiveGeometry] = PHASE::ALL;
       }
-      else if( ch == '/' || ch == '?')
+      else if (ch == '/' || ch == '?')
       {
          // Load demo level-set functions
          gLevelSets[0] = load_LS_from_string("sin(0.43*x)+cos(y)-1");
          gLevelSets[1] = load_LS_from_string("sin(x)-1.2*cos(y)+1");
          gLevelSets[2] = load_LS_from_string("x^2+y^2-1");
          gNumGeoms = 3;
-         
+
          // Set to plot all geometries
-         for( int iG = 0; iG < gNumGeoms; iG++ )
+         for (int iG = 0; iG < gNumGeoms; iG++)
          {
             gGeomsPhaseToPlot[iG] = PHASE::ALL;
          }
+         // Set demo phase table
+         std::fill(gPhaseTable.begin(), gPhaseTable.end(), -1);
+         gPhaseTable[0] = 0;
+         gPhaseTable[1] = 0;
+         gPhaseTable[2] = 0;
+         gPhaseTable[3] = 0;
+         gPhaseTable[4] = 1;
+         gPhaseTable[5] = 0;
+         gPhaseTable[6] = 0;
+         gPhaseTable[7] = 0;
       }
       else if (ch == 27) // Escape key
          exit(0);
 
-
       // If a number key was pressed, update the active phases to plot to only plot that geometry
-      if( ch == '0' || ch == '1' || ch == '2' || ch == '3' || ch == '4' ||
-          ch == '5' || ch == '6' || ch == '7' || ch == '8' || ch == '9' )
+      if (ch == '0' || ch == '1' || ch == '2' || ch == '3' || ch == '4' ||
+          ch == '5' || ch == '6' || ch == '7' || ch == '8' || ch == '9')
       {
          int tGeomIndex = ch - '0';
          reset_active_phases();
