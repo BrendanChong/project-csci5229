@@ -545,14 +545,14 @@ namespace moris::GUI
          tColCenterX = tColsX + j * tColSpacingPixels + (tColSpacingPixels / 2);
          int xpos = std::max(0, tColCenterX - tKeyWidth / 2);
          glWindowPos2i(xpos, 940);
-         Print(tPhaseKey.c_str());
+         Print("%s", tPhaseKey.c_str());
       }
 
       // Title
       std::string tTitle = "PHASE TABLE";
       std::string tDivider = "--------------------------------";
       glWindowPos2i(tPixelLength(tDivider) / 2, 960);
-      Print(tTitle.c_str());
+      Print("%s", tTitle.c_str());
 
       // divider line
       glWindowPos2i(tLeftX, 920);
@@ -568,7 +568,7 @@ namespace moris::GUI
          // draw phase label on the left (use baseX left margin)
          std::string tPhaseKey = "Phase " + std::to_string(i) + " | ";
          glWindowPos2i(tLeftX, y);
-         Print(tPhaseKey.c_str());
+         Print("%s", tPhaseKey.c_str());
 
          // draw each symbol at its column center
          for (int j = 0; j < tNumCols; ++j)
@@ -579,13 +579,13 @@ namespace moris::GUI
             int tKeyWidth = tPixelLength(tKey);
             int tKeyX = std::max(0, tColCenterX - tKeyWidth / 2);
             glWindowPos2i(tKeyX, y);
-            Print(tKey.c_str());
+            Print("%s", tKey.c_str());
          }
 
          // draw the phase-table value to the right
          std::string tPhaseIndex = std::to_string(gPhaseTable[i]);
          glWindowPos2i(tValueX, y);
-         Print(tPhaseIndex.c_str());
+         Print("%s", tPhaseIndex.c_str());
       }
    }
 
