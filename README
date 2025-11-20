@@ -1,0 +1,69 @@
+Level-Set phase visualizer for MORIS GUI
+
+author: Brendan Chong
+TOTAL TIME: 20 hours?
+
+The project is intended to be used alongside a Qt GUI (in development) for an immersed Finite Element codebase.
+In the code, geometries are defined by the union of Level-Set functions defined over the mesh domain. Each Level-Set function can either be positive, negative, or zero.
+
+To map the Level-Set to a phase, and eventually a material in the physics problem, a phase table must be specified. The phase table provides a phase index to every possible combination of +/- for each geometry. Thus, the phase table is necessarily of size 2^num_geometries. The default phase table for 3 geometries is listed below
+
+        Level-Set Field index  
+            0   1   2
+---------------------------------------
+Phase 0 |   -   -   -   |
+Phase 1 |   -   -   +   |
+Phase 2 |   -   +   -   |
+Phase 3 |   -   +   +   |
+Phase 4 |   +   -   -   |
+Phase 5 |   +   -   +   |
+Phase 6 |   +   +   -   |
+Phase 7 |   +   +   +   |
+
+Note that multiple bitsets (combinations of +/- for each geometry) can be mapped to the same index. This code shows both the plots of the Level-Set functions, as well as the resulting phase distribution. It allows for arbitrary Level-Set functions to be added at the user discretion and different phase tables to be assigned.
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+-------CONTROLS---------
+    GENERAL:
+        mouse   : Click and drag to rotate the Level-Set geometries and view different features
+        scroll  : Scale the domain to be larger (downscroll) or smaller (upscroll)
+        l       : Toggles lighting
+        / or ?  : Toggles the demo, which has three Level-Set functions and a phase table with only two phases
+        
+
+    LEVEL-SET ASSIGNMENTS:
+        n       : Add a new Level-Set geometry (maximum 5). A prompt will appear in the terminal to type the function
+        0-4     : View only the Level-Set geometry assigned to that index
+        Enter   : Edits the currently active geometry (Ex. press 1, Enter to change the equation for LS1)
+        d       : Deletes the current Level-Set geometry and shifts the remaining geometries down. If all geometries are currently being viewed, it will delete geometry 0
+
+
+    PHASE CONTROLS:
+        p       : Set phase table. A prompt will appear in the terminal to type a comma or space separated vector for the phase table.
+                  Note that the phase table is visualized on the screen
+        _       : (Underscore) Views phase 0 since there is no F0 key
+        F1-F12  : View the phase associated with that key (ie. F1 shows phase 1). The view is populated on both the main plot viewer as well as the projection
+        +       : Shows the regions where any currently viewed Level-Sets are positive
+        -       : Shows the regions where any currently viewed Level-Sets are negative
+        Space   : Shows all phases
+
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+-------FEATURES---------
+    - Utilizes two viewports to show the vertical projection of what the 2D mesh will look like
+        * Originally I wanted to use a custom shader to only have to render the LS functions once, but this seems to be more complex than just assigning the shader to only one viewport.
+    - Computes lighting using a finite difference to approximate the gradient of the Level-Set function
+    - Tons of functionality to really customize what you want to view. Should be easy to convert to GUI controlled in the future
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+-------OUTLOOK---------
+    - For the final project, I want to map textures with different numbers to the 2D projection in the top right so you can still get a sense of where each LS geometry is.
+      The only reason I didn't do this for this submission is because I couldn't find the right textures online, so I'm going to make them on my own.
+    - In my proposal I wanted to do a visualizer as well for .obj files. The finite element code accepts 2D .obj files, which aren't usually a thing. 
+      I will likely thus have to write a custom .obj file loader for this project to enable this functionality, but it might be a hassle.
+    - The edges of the functions are very jagged when viewing specific phases. To fix this, I want to implement a marching squares algorithm to precisely get vertices
+      along the zero isocontour line, and then add these to the plot. This would also enable the functionality to include the isocontour lines in black on the main plot, which would be helpful.
+    - The end goal is to integrate this with a Qt GUI, which would be nice to have done before the end of the project. This would overhaul the controls and make everything significantly easier to handle.
