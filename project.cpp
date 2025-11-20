@@ -7,6 +7,7 @@
 #include <sstream>
 #include <bitset>
 #include <numeric>
+#include <algorithm>
 #include "CSCIx229.h"
 #ifdef USEGLEW
 #include <GL/glew.h>
@@ -59,7 +60,7 @@ namespace moris::GUI
    //-----------------------------------------------------------
    int tLight = 0;     // Lighting on or off
    int tSmooth = 1;    // Smooth/Flat shading
-   int tMoveLight = 1; // Move light in idle or not
+   int gMoveLight = 0; // Move light in idle or not
 
    int tDistance = 5;  // Light distance
    int tInc = 10;      // Ball increment
@@ -113,6 +114,7 @@ namespace moris::GUI
       return v;
    }();
    std::vector<PHASE> gGeomsPhaseToPlot(MAX_GEOMETRIES, PHASE::NONE); // 0 = don't plot, 1 = plot positive, -1 = plot negative, 2 = plot both
+   std::vector<int> gPhasesToPlot = gPhaseTable;                      // Phases to plot
 
    // Colors for each geometry (Paraview KAAMS color scheme)
    std::vector<std::vector<double>> gColors = {
@@ -238,6 +240,7 @@ namespace moris::GUI
 
       // Get all the bitset indices for the given phase
       std::vector<int> tIndices = get_indices_for_phase(aIndex);
+
 
       // Loop through the bitsets and convert to binary to set active regions for each geometry
       for (int iIndex : tIndices)
@@ -428,20 +431,26 @@ namespace moris::GUI
       return aLS.value();
    }
 
-   void drawLS3D(LS aLS, PHASE aSign, int aColorIndex)
+   void drawLS3D(LS aLS, PHASE aSign, int aColorIndex, float aAlpha = 1.0f)
    {
       // TODO
 
       Fatal("drawLS3D not implemented yet");
    }
 
-   void drawLS2D(LS aLS, PHASE aSign, int aColorIndex)
+   void drawLS2D(LS aLS, PHASE aSign, int aColorIndex, float aAlpha = 1.0f)
    {
       // Check if we need to plot this geometry
       if (aSign == PHASE::NONE)
       {
          return; // don't plot
       }
+
+      // if( aAlpha < 1.0f )
+      // {
+      //    glEnable( GL_BLEND );
+      //    glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+      // }
 
       glPushMatrix();
 
@@ -454,28 +463,77 @@ namespace moris::GUI
          bool stripOpen = false;
          double x0 = tXVals[i];
          double x1 = tXVals[i + 1];
-
          for (int j = 0; j < NUM_POINTS; j++)
          {
             double z = tYVals[j]; // Since OpenGL Y is up, we use Z here. LS function is still (x,y)
             double y0 = eval_LS(aLS, x0, z);
             double y1 = eval_LS(aLS, x1, z);
 
-            bool valid0 = !((aSign == PHASE::POSITIVE && y0 < 0) || (aSign == PHASE::NEGATIVE && y0 > 0));
-            bool valid1 = !((aSign == PHASE::POSITIVE && y1 < 0) || (aSign == PHASE::NEGATIVE && y1 > 0));
+            bool tValid0 = !((aSign == PHASE::POSITIVE && y0 < 0) || (aSign == PHASE::NEGATIVE && y0 > 0));
+            bool tValid1 = !((aSign == PHASE::POSITIVE && y1 < 0) || (aSign == PHASE::NEGATIVE && y1 > 0));
 
             // If both vertices are valid, emit them into the strip. Otherwise close the current strip.
-            if (valid0 && valid1)
+            if (tValid0 && tValid1)
             {
                if (!stripOpen)
                {
                   glBegin(GL_TRIANGLE_STRIP);
                   stripOpen = true;
                }
-               // Set color for this geometry
-               glColor3d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2]);
-               // Emit the two vertices for this column
+
+               // Set color (with alpha) for this geometry
+               glColor4d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2], aAlpha);
+
+               // Compute per-vertex normals via finite differences (central where possible)
+               // Vertex 0 (index i)
+               int ix0 = i;
+               int iz = j;
+               int ix0_plus = (ix0 < NUM_POINTS - 1) ? ix0 + 1 : ix0;
+               int ix0_minus = (ix0 > 0) ? ix0 - 1 : ix0;
+               int iz_plus = (iz < NUM_POINTS - 1) ? iz + 1 : iz;
+               int iz_minus = (iz > 0) ? iz - 1 : iz;
+
+               double y_xplus = eval_LS(aLS, tXVals[ix0_plus], tYVals[iz]);
+               double y_xminus = eval_LS(aLS, tXVals[ix0_minus], tYVals[iz]);
+               double dx = tXVals[ix0_plus] - tXVals[ix0_minus];
+               double sx = (dx != 0.0) ? (y_xplus - y_xminus) / dx : 0.0;
+
+               double y_zplus = eval_LS(aLS, tXVals[ix0], tYVals[iz_plus]);
+               double y_zminus = eval_LS(aLS, tXVals[ix0], tYVals[iz_minus]);
+               double dz = tYVals[iz_plus] - tYVals[iz_minus];
+               double sz = (dz != 0.0) ? (y_zplus - y_zminus) / dz : 0.0;
+
+               double nx0 = -sx;
+               double ny0 = 1.0;
+               double nz0 = -sz;
+               double L0 = sqrt(nx0 * nx0 + ny0 * ny0 + nz0 * nz0);
+               if (L0 > 0.0) { nx0 /= L0; ny0 /= L0; nz0 /= L0; }
+
+               // Vertex 1 (index i+1)
+               int ix1 = i + 1;
+               int ix1_plus = (ix1 < NUM_POINTS - 1) ? ix1 + 1 : ix1;
+               int ix1_minus = (ix1 > 0) ? ix1 - 1 : ix1;
+
+               double y1_xplus = eval_LS(aLS, tXVals[ix1_plus], tYVals[iz]);
+               double y1_xminus = eval_LS(aLS, tXVals[ix1_minus], tYVals[iz]);
+               double dx1 = tXVals[ix1_plus] - tXVals[ix1_minus];
+               double sx1 = (dx1 != 0.0) ? (y1_xplus - y1_xminus) / dx1 : 0.0;
+
+               double y1_zplus = eval_LS(aLS, tXVals[ix1], tYVals[iz_plus]);
+               double y1_zminus = eval_LS(aLS, tXVals[ix1], tYVals[iz_minus]);
+               double dz1 = tYVals[iz_plus] - tYVals[iz_minus];
+               double sz1 = (dz1 != 0.0) ? (y1_zplus - y1_zminus) / dz1 : 0.0;
+
+               double nx1 = -sx1;
+               double ny1 = 1.0;
+               double nz1 = -sz1;
+               double L1 = sqrt(nx1 * nx1 + ny1 * ny1 + nz1 * nz1);
+               if (L1 > 0.0) { nx1 /= L1; ny1 /= L1; nz1 /= L1; }
+
+               // Emit vertices with normals
+               glNormal3d(nx0, ny0, nz0);
                glVertex3d(x0, y0, z);
+               glNormal3d(nx1, ny1, nz1);
                glVertex3d(x1, y1, z);
             }
             else
@@ -496,7 +554,96 @@ namespace moris::GUI
 
       glPopMatrix();
 
+      // if( aAlpha < 1.0f )
+      // {
+      //    glDisable( GL_BLEND );
+      // }
+
       ErrCheck("drawLS");
+   }
+
+   /**
+    * Draws only regions that satisfy the bitset for the all the geometries
+    */
+   void draw_LS_projection_2D(std::vector<LS> &aLevelSets, std::vector<int> &aBitset, int aColorIndex, float aAlpha = 1.0f)
+   {
+      if((int)aBitset.size() != gNumGeoms)
+      {         
+         Fatal("draw_LS_projection_2D: Bitset size does not match number of level-sets");
+      }
+
+      glPushMatrix();
+
+
+      std::vector<double> tXVals = linspace(tXLB, tXUB, NUM_POINTS);
+      std::vector<double> tYVals = linspace(tZLB, tZUB, NUM_POINTS);
+
+      // Draw the surface, splitting triangle strips when vertices don't match sign condition
+      for (int i = 0; i < NUM_POINTS - 1; i++)
+      {
+         bool stripOpen = false;
+         double x0 = tXVals[i];
+         double x1 = tXVals[i + 1];
+         for (int j = 0; j < NUM_POINTS; j++)
+         {
+            double z = tYVals[j]; // Since OpenGL Y is up, we use Z here. LS function is still (x,y)
+
+            // Need to evaluate all level set fields at this point
+            std::vector<double> y0_vals(aLevelSets.size());
+            std::vector<double> y1_vals(aLevelSets.size());
+            bool tValid0 = true;
+            bool tValid1 = true;
+            for( size_t iG = 0; iG < aLevelSets.size(); iG++ )
+            {
+               y0_vals[iG] = eval_LS( aLevelSets[iG], x0, z );
+               y1_vals[iG] = eval_LS( aLevelSets[iG], x1, z );
+
+               // Check validity for vertex 0
+               if( ( aBitset[iG] == 1 && y0_vals[iG] < 0 ) ||
+                     ( aBitset[iG] == 0 && y0_vals[iG] > 0 ) )
+                  {
+                  tValid0 = false;
+               }
+               // Check validity for vertex 1
+               if( ( aBitset[iG] == 1 && y1_vals[iG] < 0 ) ||
+                   ( aBitset[iG] == 0 && y1_vals[iG] > 0 ) )
+               {
+                  tValid1 = false;
+               }
+            }
+            // If both vertices are valid, emit them into the strip. Can pick any geometry as we will only see the top down projection
+            if (tValid0 && tValid1)
+            {
+               if (!stripOpen)
+               {
+                  glBegin(GL_TRIANGLE_STRIP);
+                  stripOpen = true;
+               }
+
+               // Set color (with alpha) for this geometry
+               glColor4d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2], aAlpha);
+
+               // Emit vertices
+               glVertex3d(x0, y0_vals[0], z);
+               glVertex3d(x1, y1_vals[0], z);
+            }
+            else
+            {
+               if (stripOpen)
+               {
+                  glEnd();
+                  stripOpen = false;
+               }
+            }
+         }
+         if (stripOpen)
+         {
+            glEnd();
+            stripOpen = false;
+         }
+      }
+
+      glPopMatrix();
    }
 
    void print_phase_table()
@@ -661,7 +808,7 @@ namespace moris::GUI
       {
          for (int iG = 0; iG < gNumGeoms; iG++)
          {
-            drawLS2D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG);
+            drawLS2D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG, 0.8f);
          }
          break;
       }
@@ -669,7 +816,7 @@ namespace moris::GUI
       {
          for (int iG = 0; iG < gNumGeoms; iG++)
          {
-            drawLS3D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG);
+            drawLS3D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG, 0.8f);
          }
          break;
       }
@@ -715,55 +862,60 @@ namespace moris::GUI
       // Viewport 2 (projection, top-down view)
       //-----------------------------------------------------------
 
-      // Projection viewport (top down view)
-      glViewport(gWidth * 0.7, gHeight * 0.7, gProjWidth, gProjHeight);
-      glDisable(GL_LIGHTING);
-
-      // Reset transformations
-      glLoadIdentity();
-
-      // Set top-down view
-      glRotated(90, 1.0, 0.0, 0.0);
-
-      // Set the plot to be centered at the middle of the domain
-      glTranslated((-0.5 * (tXLB + tXUB)), 0.0, (-0.5 * (tZLB + tZUB)));
-
-      // Plot the level-set geometries again, but this time we choose the color based on the phase table
-      for( size_t iPhase = 0; iPhase < (size_t)(1 << gNumGeoms);  iPhase++)
+      if( gNumGeoms != 0 )
       {
-         // Get the bitset for this phase
-         std::vector<int> tBinary = int_to_binary(iPhase, gNumGeoms);
+         // Projection viewport (top down view)
+         glViewport(gWidth * 0.7, gHeight * 0.7, gProjWidth, gProjHeight);
+         glDisable(GL_LIGHTING);
 
-         // Plot each geometry according to the bitset, using the color for this phase
-         switch (gSpatialDim)
-         {
-         case 2:
-         {
-            for (int iG = 0; iG < gNumGeoms; iG++)
+         // Reset transformations
+         glLoadIdentity();
+
+         // Set top-down view
+         glRotated(90, 1.0, 0.0, 0.0);
+
+         // Set the plot to be centered at the middle of the domain
+         glTranslated((-0.5 * (tXLB + tXUB)), 0.0, (-0.5 * (tZLB + tZUB)));
+
+         // Plot the level-set geometries again, but this time we choose the color based on the phase table
+         for( size_t iPhase = 0; iPhase < (size_t)(1 << gNumGeoms);  iPhase++)
+         {         
+            if(std::find(gPhasesToPlot.begin(), gPhasesToPlot.end(), gPhaseTable[iPhase]) == gPhasesToPlot.end())
             {
-               drawLS2D(gLevelSets[iG], tBinary[iG] == 1 ? PHASE::POSITIVE : PHASE::NEGATIVE, gPhaseTable[iPhase]);
+               continue; // skip this phase, not in the list to plot
             }
-            break;
-         }
-         case 3:
-         {
-            for (int iG = 0; iG < gNumGeoms; iG++)
+            
+            // Get the bitset for this phase
+            std::vector<int> tBinary = int_to_binary(iPhase, gNumGeoms);
+
+            // Plot each geometry according to the bitset, using the color for this phase
+            switch (gSpatialDim)
             {
-               drawLS3D(gLevelSets[iG], tBinary[iG] == 1 ? PHASE::POSITIVE : PHASE::NEGATIVE, gPhaseTable[iPhase]);
+            case 2:
+            {
+               draw_LS_projection_2D(gLevelSets, tBinary, gPhaseTable[iPhase], 1.0f); // TODO: Wrap the color index around
+               break;
             }
-            break;
+            case 3:
+            {
+               for (int iG = 0; iG < gNumGeoms; iG++)
+               {
+                  drawLS3D(gLevelSets[iG], tBinary[iG] == 1 ? PHASE::POSITIVE : PHASE::NEGATIVE, gPhaseTable[iPhase]); // TODO: Wrap the color index around
+               }
+               break;
+            }
+            default:
+            {
+               Fatal("Unsupported spatial dimension %d", gSpatialDim);
+            }
+            }
          }
-         default:
-         {
-            Fatal("Unsupported spatial dimension %d", gSpatialDim);
-         }
-         }
+
+         // Print xtk temp label
+         glColor3f(1.0, 1.0, 1.0);
+         glWindowPos2i(gWidth * 0.82, gHeight * 0.73);
+         Print("XTK Temp Result");
       }
-
-      // Print xtk temp label
-      glColor3f(1.0, 1.0, 1.0);
-      glWindowPos2i(gWidth * 0.82, gHeight * 0.73);
-      Print("XTK Temp Result");
 
       //-----------------------------------------------------------
       // Clean up
@@ -831,6 +983,9 @@ namespace moris::GUI
 
             // reset phase table
             std::iota(gPhaseTable.begin(), gPhaseTable.end(), 0);
+
+            gPhasesToPlot.resize(*std::max_element(gPhaseTable.begin(), gPhaseTable.end()) + 1);
+            std::iota(gPhasesToPlot.begin(), gPhasesToPlot.end(), 0);
          }
          else
          {
@@ -885,6 +1040,7 @@ namespace moris::GUI
       else if (ch == '_')
       {
          set_active_phases_from_phase_index(0); // since there's no F0 key
+         gPhasesToPlot = {0};
       }
       else if (ch == 'd' || ch == 'D')
       {
@@ -907,6 +1063,10 @@ namespace moris::GUI
          {
             gGeomsPhaseToPlot[iG] = PHASE::ALL;
          }
+
+         // Plot all phases - projection
+         gPhasesToPlot.resize(*std::max_element(gPhaseTable.begin(), gPhaseTable.end()) + 1);
+         std::iota(gPhasesToPlot.begin(), gPhasesToPlot.end(), 0);
       }
       else if (ch == '+')
       {
@@ -923,6 +1083,9 @@ namespace moris::GUI
          {
             gGeomsPhaseToPlot[iG] = PHASE::ALL;
          }
+
+         gPhasesToPlot.resize(*std::max_element(gPhaseTable.begin(), gPhaseTable.end()) + 1);
+         std::iota(gPhasesToPlot.begin(), gPhasesToPlot.end(), 0);
       }
       else if (ch == 13) // Enter key
       {
@@ -931,6 +1094,9 @@ namespace moris::GUI
 
          // Set to plot this geometry
          gGeomsPhaseToPlot[gActiveGeometry] = PHASE::ALL;
+
+         gPhasesToPlot.resize(*std::max_element(gPhaseTable.begin(), gPhaseTable.end()) + 1);
+         std::iota(gPhasesToPlot.begin(), gPhasesToPlot.end(), 0);
       }
       else if (ch == '/' || ch == '?')
       {
@@ -945,6 +1111,7 @@ namespace moris::GUI
          {
             gGeomsPhaseToPlot[iG] = PHASE::ALL;
          }
+
          // Set demo phase table
          std::fill(gPhaseTable.begin(), gPhaseTable.end(), -1);
          gPhaseTable[0] = 0;
@@ -955,6 +1122,9 @@ namespace moris::GUI
          gPhaseTable[5] = 0;
          gPhaseTable[6] = 0;
          gPhaseTable[7] = 0;
+
+         // Plot all phases
+         gPhasesToPlot = {0,1};
       }
       else if (ch == 27) // Escape key
          exit(0);
@@ -979,57 +1149,69 @@ namespace moris::GUI
       if (key == GLUT_KEY_F1) // F1 key
       {
          set_active_phases_from_phase_index(1);
+         gPhasesToPlot = {1};
       }
       else if (key == GLUT_KEY_F2) // F2 key
       {
          set_active_phases_from_phase_index(2);
+         gPhasesToPlot = {2};
       }
       else if (key == GLUT_KEY_F3) // F3 key
       {
          set_active_phases_from_phase_index(3);
+         gPhasesToPlot = {3};
       }
       else if (key == GLUT_KEY_F4) // F4 key
       {
          set_active_phases_from_phase_index(4);
+         gPhasesToPlot = {4};
       }
       else if (key == GLUT_KEY_F5) // F5 key
       {
          set_active_phases_from_phase_index(5);
+         gPhasesToPlot = {5};
       }
       else if (key == GLUT_KEY_F6) // F6 key
       {
          set_active_phases_from_phase_index(6);
+         gPhasesToPlot = {6};
       }
       else if (key == GLUT_KEY_F7) // F7 key
       {
          set_active_phases_from_phase_index(7);
+         gPhasesToPlot = {7};
       }
       else if (key == GLUT_KEY_F8) // F8 key
       {
          set_active_phases_from_phase_index(8);
+         gPhasesToPlot = {8};
       }
       else if (key == GLUT_KEY_F9) // F9 key
       {
          set_active_phases_from_phase_index(9);
+         gPhasesToPlot = {9};
       }
       else if (key == GLUT_KEY_F10) // F10 key
       {
          set_active_phases_from_phase_index(10);
+         gPhasesToPlot = {10};
       }
       else if (key == GLUT_KEY_F11) // F11 key
       {
          set_active_phases_from_phase_index(11);
+         gPhasesToPlot = {11};
       }
       else if (key == GLUT_KEY_F12) // F12 key
       {
          set_active_phases_from_phase_index(12);
+         gPhasesToPlot = {12};
       }
    }
 
    // Function for basic animations
    void idle()
    {
-      if (tMoveLight)
+      if (gMoveLight)
       {
          tZeta = (tZeta + 1) % 360;
 
