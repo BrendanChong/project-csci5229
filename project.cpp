@@ -116,6 +116,7 @@ namespace moris::GUI
 
    // Colors for each geometry (Paraview KAAMS color scheme)
    std::vector<std::vector<double>> gColors = {
+      {1.0, 1.0, 1.0},
        {1.0, 0.0, 0.0},
        {0.0, 1.0, 0.0},
        {0.0, 0.0, 1.0},
@@ -714,9 +715,6 @@ namespace moris::GUI
       // Viewport 2 (projection, top-down view)
       //-----------------------------------------------------------
 
-      // Main viewport
-      glViewport(0, 0, gWidth, gHeight);
-
       // Projection viewport (top down view)
       glViewport(gWidth * 0.7, gHeight * 0.7, gProjWidth, gProjHeight);
       glDisable(GL_LIGHTING);
@@ -731,28 +729,35 @@ namespace moris::GUI
       glTranslated((-0.5 * (tXLB + tXUB)), 0.0, (-0.5 * (tZLB + tZUB)));
 
       // Plot the level-set geometries again, but this time we choose the color based on the phase table
-      switch (gSpatialDim)
+      for( size_t iPhase = 0; iPhase < (size_t)(1 << gNumGeoms);  iPhase++)
       {
-      case 2:
-      {
-         for (int iG = 0; iG < gNumGeoms; iG++)
+         // Get the bitset for this phase
+         std::vector<int> tBinary = int_to_binary(iPhase, gNumGeoms);
+
+         // Plot each geometry according to the bitset, using the color for this phase
+         switch (gSpatialDim)
          {
-            drawLS2D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG);
-         }
-         break;
-      }
-      case 3:
-      {
-         for (int iG = 0; iG < gNumGeoms; iG++)
+         case 2:
          {
-            drawLS3D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG);
+            for (int iG = 0; iG < gNumGeoms; iG++)
+            {
+               drawLS2D(gLevelSets[iG], tBinary[iG] == 1 ? PHASE::POSITIVE : PHASE::NEGATIVE, gPhaseTable[iPhase]);
+            }
+            break;
          }
-         break;
-      }
-      default:
-      {
-         Fatal("Unsupported spatial dimension %d", gSpatialDim);
-      }
+         case 3:
+         {
+            for (int iG = 0; iG < gNumGeoms; iG++)
+            {
+               drawLS3D(gLevelSets[iG], tBinary[iG] == 1 ? PHASE::POSITIVE : PHASE::NEGATIVE, gPhaseTable[iPhase]);
+            }
+            break;
+         }
+         default:
+         {
+            Fatal("Unsupported spatial dimension %d", gSpatialDim);
+         }
+         }
       }
 
       // Print xtk temp label
