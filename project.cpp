@@ -47,11 +47,10 @@ namespace moris::GUI
    // Global projection variables
    //-----------------------------------------------------------
 
-   // FIXME: change names to global convention
-   double tAsp = 16.0 / 9.0; // Aspect ratio
+   double gAsp = 16.0 / 9.0; // Aspect ratio
    int gFOV = 110;           // Field of view for perspective
    int gMode = 0;            // perspective mode switcher
-   double tDim = 1.7;        // Size of the world
+   double gDim = 1.7;        // Size of the world
    int gPhi = 20;            // Elevation of view angle
    int gTheta = 0;           // Azimuth of view angle
 
@@ -133,6 +132,7 @@ namespace moris::GUI
    //-----------------------------------------------------------
    // Global viewport variables
    //-----------------------------------------------------------
+   bool gProjectionMain = true; // Flag to change main viewport to projection view
    int gWidth = 1920 / RES;  // Main window width
    int gHeight = 1080 / RES; // Main window height
 
@@ -484,52 +484,21 @@ namespace moris::GUI
                // Set color (with alpha) for this geometry
                glColor4d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2], aAlpha);
 
-               // Compute per-vertex normals via finite differences (central where possible)
-               // Vertex 0 (index i)
-               int ix0 = i;
-               int iz = j;
-               int ix0_plus = (ix0 < NUM_POINTS - 1) ? ix0 + 1 : ix0;
-               int ix0_minus = (ix0 > 0) ? ix0 - 1 : ix0;
-               int iz_plus = (iz < NUM_POINTS - 1) ? iz + 1 : iz;
-               int iz_minus = (iz > 0) ? iz - 1 : iz;
+               // Finite difference normals (forward FD for efficiency)
+               // TODO: Overload parser to get automatic derivatives
+               double tEps = 1e-8;                       // FD step size
+               double tdPhidx0 = eval_LS(aLS, x0 + tEps, z);
+               double tdPhidx1 = eval_LS(aLS, x1 + tEps, z);
+               double tdPhidz0 = eval_LS(aLS, x0, z + tEps);
+               double tdPhidz1 = eval_LS(aLS, x1, z + tEps);
 
-               double y_xplus = eval_LS(aLS, tXVals[ix0_plus], tYVals[iz]);
-               double y_xminus = eval_LS(aLS, tXVals[ix0_minus], tYVals[iz]);
-               double dx = tXVals[ix0_plus] - tXVals[ix0_minus];
-               double sx = (dx != 0.0) ? (y_xplus - y_xminus) / dx : 0.0;
-
-               double y_zplus = eval_LS(aLS, tXVals[ix0], tYVals[iz_plus]);
-               double y_zminus = eval_LS(aLS, tXVals[ix0], tYVals[iz_minus]);
-               double dz = tYVals[iz_plus] - tYVals[iz_minus];
-               double sz = (dz != 0.0) ? (y_zplus - y_zminus) / dz : 0.0;
-
-               double nx0 = -sx;
+               double nx0 = (tdPhidx0 - y0) / tEps;
                double ny0 = 1.0;
-               double nz0 = -sz;
-               double L0 = sqrt(nx0 * nx0 + ny0 * ny0 + nz0 * nz0);
-               if (L0 > 0.0) { nx0 /= L0; ny0 /= L0; nz0 /= L0; }
+               double nz0 = (tdPhidz0 - y0) / tEps;
 
-               // Vertex 1 (index i+1)
-               int ix1 = i + 1;
-               int ix1_plus = (ix1 < NUM_POINTS - 1) ? ix1 + 1 : ix1;
-               int ix1_minus = (ix1 > 0) ? ix1 - 1 : ix1;
-
-               double y1_xplus = eval_LS(aLS, tXVals[ix1_plus], tYVals[iz]);
-               double y1_xminus = eval_LS(aLS, tXVals[ix1_minus], tYVals[iz]);
-               double dx1 = tXVals[ix1_plus] - tXVals[ix1_minus];
-               double sx1 = (dx1 != 0.0) ? (y1_xplus - y1_xminus) / dx1 : 0.0;
-
-               double y1_zplus = eval_LS(aLS, tXVals[ix1], tYVals[iz_plus]);
-               double y1_zminus = eval_LS(aLS, tXVals[ix1], tYVals[iz_minus]);
-               double dz1 = tYVals[iz_plus] - tYVals[iz_minus];
-               double sz1 = (dz1 != 0.0) ? (y1_zplus - y1_zminus) / dz1 : 0.0;
-
-               double nx1 = -sx1;
+               double nx1 = (tdPhidx1 - y1) / tEps;
                double ny1 = 1.0;
-               double nz1 = -sz1;
-               double L1 = sqrt(nx1 * nx1 + ny1 * ny1 + nz1 * nz1);
-               if (L1 > 0.0) { nx1 /= L1; ny1 /= L1; nz1 /= L1; }
-
+               double nz1 = (tdPhidz1 - y1) / tEps;
                // Emit vertices with normals
                glNormal3d(nx0, ny0, nz0);
                glVertex3d(x0, y0, z);
@@ -573,7 +542,6 @@ namespace moris::GUI
       }
 
       glPushMatrix();
-
 
       std::vector<double> tXVals = linspace(tXLB, tXUB, NUM_POINTS);
       std::vector<double> tYVals = linspace(tZLB, tZUB, NUM_POINTS);
@@ -747,7 +715,14 @@ namespace moris::GUI
       //-----------------------------------------------------------
 
       // Main viewport
-      glViewport(0, 0, gWidth, gHeight);
+      if( not gProjectionMain )
+      {
+         glViewport(0, 0, gProjWidth, gProjHeight);
+      }
+      else 
+      {
+         glViewport(gWidth * 0.7, gHeight * 0.7, gProjWidth, gProjHeight);
+      }
 
       // Reset transformations
       glLoadIdentity();
@@ -775,6 +750,8 @@ namespace moris::GUI
          glEnable(GL_NORMALIZE);
          //  Enable lighting
          glEnable(GL_LIGHTING);
+         glLightModeli(GL_LIGHT_MODEL_TWO_SIDE, GL_TRUE);      // light front and back faces
+         glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_TRUE);
          //  Location of viewer for specular calculations
          // glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER,local);
          //  glColor sets ambient and diffuse color materials
@@ -865,7 +842,14 @@ namespace moris::GUI
       if( gNumGeoms != 0 )
       {
          // Projection viewport (top down view)
-         glViewport(gWidth * 0.7, gHeight * 0.7, gProjWidth, gProjHeight);
+         if( gProjectionMain )
+         {
+            glViewport(0, 0, gWidth, gHeight);
+         }
+         else
+         {
+            glViewport(gWidth * 0.7, gHeight * 0.7, gProjWidth, gProjHeight);
+         }
          glDisable(GL_LIGHTING);
 
          // Reset transformations
@@ -877,7 +861,7 @@ namespace moris::GUI
          // Set the plot to be centered at the middle of the domain
          glTranslated((-0.5 * (tXLB + tXUB)), 0.0, (-0.5 * (tZLB + tZUB)));
 
-         // Plot the level-set geometries again, but this time we choose the color based on the phase table
+         // Plot the level-set geometries again, choose the color based on the phase table
          for( size_t iPhase = 0; iPhase < (size_t)(1 << gNumGeoms);  iPhase++)
          {         
             if(std::find(gPhasesToPlot.begin(), gPhasesToPlot.end(), gPhaseTable[iPhase]) == gPhasesToPlot.end())
@@ -944,9 +928,9 @@ namespace moris::GUI
 
       // Apply projection based on the current mode
       if (gMode == 0)
-         Project(0, tAsp, tDim);
+         Project(0, gAsp, gDim);
       else
-         Project(gFOV, tAsp, tDim);
+         Project(gFOV, gAsp, gDim);
    }
 
    void key(unsigned char ch, int x, int y)
@@ -970,6 +954,10 @@ namespace moris::GUI
       else if (ch == 't' || ch == 'T')
       {
          tTextures = 1 - tTextures;
+      }
+      else if (ch == 'q' || ch == 'Q' )
+      {
+         gProjectionMain = not gProjectionMain;
       }
       else if (ch == 'n' || ch == 'N')
       {
@@ -1252,9 +1240,9 @@ namespace moris::GUI
 
          // Apply projection based on the current mode
          if (gMode == 0)
-            Project(0, tAsp, tDim);
+            Project(0, gAsp, gDim);
          else
-            Project(gFOV, tAsp, tDim);
+            Project(gFOV, gAsp, gDim);
          glutPostRedisplay();
       }
    }
@@ -1301,9 +1289,9 @@ namespace moris::GUI
 
          // Update the projection
          if (gMode == 0)
-            Project(0, tAsp, tDim);
+            Project(0, gAsp, gDim);
          else
-            Project(gFOV, tAsp, tDim);
+            Project(gFOV, gAsp, gDim);
 
          glutPostRedisplay();
          return;
