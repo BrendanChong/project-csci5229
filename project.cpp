@@ -1431,56 +1431,62 @@ namespace moris::GUI
                tBitset[iG] = ( phi >= 0 ) ? 1 : 0;
             }
 
-            // Get the phase index (to determine color)
-            int tPhaseIndex = bitset_to_int( tBitset );
-
-            // Plot this phase with a texture
-            gSelectedBitset = tPhaseIndex;
-            glutPostRedisplay();
-
-            // Capture the bitset and phase index by value for the background thread
-            std::vector<int> tBitsetCopy = tBitset;
-            int tPhaseIdxCopy = tPhaseIndex;
-
-            std::thread([tPhaseIdxCopy, tBitsetCopy]() mutable 
+            if( gSelectedBitset == MORIS_UINT_MAX )
             {
-               
-               // Prompt to get new phase value
-               std::cout << "Enter a phase for the current bitset (";
-               for (size_t i = 0; i < tBitsetCopy.size(); ++i)
-               {
-                  std::cout << (tBitsetCopy[i] == 1 ? "+" : "-");
-                  if (i + 1 < tBitsetCopy.size())
-                     std::cout << ",";
-               }
-               std::cout << "): ";
+               // Capture the bitset and phase index by value for the background thread
+               std::vector<int> tBitsetCopy = tBitset;
+               int tPhaseIdxCopy = tPhaseIndex;
 
-               std::string tInput;
-               std::getline(std::cin, tInput);
-
-               int tPhaseValue = 0;
-               try
+               std::thread([tPhaseIdxCopy, tBitsetCopy]() mutable 
                {
-                  tInput = trim(tInput);
-                  if (!tInput.empty())
-                     tPhaseValue = std::stoi(tInput);
-               }
-               catch (const std::exception &)
-               {
-                  std::cerr << "Invalid phase input - ignoring.\n";
-               }
+                  // Prompt to get new phase value
+                  std::cout << "Enter a phase for the current bitset (";
+                  for (size_t i = 0; i < tBitsetCopy.size(); ++i)
+                  {
+                     std::cout << (tBitsetCopy[i] == 1 ? "+" : "-");
+                     if (i + 1 < tBitsetCopy.size())
+                        std::cout << ",";
+                  }
+                  std::cout << "): ";
 
-               // Update shared phase table safely
-               {
-                  std::lock_guard<std::mutex> lock(gPhaseTableMutex);
-                  if (tPhaseIdxCopy >= 0 && tPhaseIdxCopy < (int)gPhaseTable.size())
-                     gPhaseTable[tPhaseIdxCopy] = tPhaseValue;
-               }
+                  std::string tInput;
+                  std::getline(std::cin, tInput);
 
-               // Clear selection and request a redisplay from the main loop
-               gSelectedBitset = MORIS_UINT_MAX;
-               gRequestRedisplay.store(true);
-            }).detach();
+                  int tPhaseValue = 0;
+                  try
+                  {
+                     tInput = trim(tInput);
+                     if (!tInput.empty())
+                        tPhaseValue = std::stoi(tInput);
+                  }
+                  catch (const std::exception &)
+                  {
+                     std::cerr << "Invalid phase input - ignoring.\n";
+                  }
+
+                  // Update shared phase table safely
+                  {
+                     std::lock_guard<std::mutex> lock(gPhaseTableMutex);
+                     if (tPhaseIdxCopy >= 0 && tPhaseIdxCopy < (int)gPhaseTable.size())
+                        gPhaseTable[tPhaseIdxCopy] = tPhaseValue;
+                  }
+
+                  // Clear selection and request a redisplay from the main loop
+                  gSelectedBitset = MORIS_UINT_MAX;
+                  gRequestRedisplay.store(true);
+               }).detach();
+            }
+            else 
+            {
+               // Get the phase index (to determine color)
+               int tPhaseIndex = bitset_to_int( tBitset );
+
+               // Plot this phase with a texture
+               gSelectedBitset = tPhaseIndex;
+               glutPostRedisplay();
+            }
+
+
          }
       }
    }
