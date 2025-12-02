@@ -29,7 +29,7 @@
 #define RES 1
 #endif
 
-#define NUM_POINTS 100   // number of points in each direction for the grid
+#define NUM_POINTS 200   // number of points in each direction for the grid
 #define MAX_GEOMETRIES 5 // Maximum number of geometries
 #define MORIS_UINT_MAX 4294967295u // Maximum value for an unsigned int, remove this for final moris build
 
@@ -63,7 +63,7 @@ namespace moris::GUI
    //-----------------------------------------------------------
    // Global lighting variables
    //-----------------------------------------------------------
-   int tLight = 0;     // Lighting on or off
+   int tLight = 1;     // Lighting on or off
    int tSmooth = 1;    // Smooth/Flat shading
    int gMoveLight = 0; // Move light in idle or not
 
@@ -102,10 +102,11 @@ namespace moris::GUI
    double tXUB = 1.0;                          // x upper bound
    double tZLB = -1.0;                         // z lower bound
    double tZUB = 1.0;                          // z upper bound
+   double gScale = 1.0;                         // Scale factor for zooming
    double gX, gY, gZ;                          // Global coordinates for LS evaluation
    std::vector<LS> gLevelSets(MAX_GEOMETRIES); // Vector of level-set functions
-   int gActiveGeometry = 0;                    // Currently active geometry for user input
-   int gNumGeoms = 0;                          // Number of geometries defined
+   unsigned int gActiveGeometry = MORIS_UINT_MAX;       // Currently active geometry for user input
+   unsigned int gNumGeoms = 0;                          // Number of geometries defined
 
    //-----------------------------------------------------------
    // Global phase variables
@@ -184,9 +185,9 @@ namespace moris::GUI
       return tBinary;
    }
 
-   int bitset_to_int(Bitset aBitset )
+   unsigned int bitset_to_int(Bitset aBitset )
    {
-      int tValue = 0;
+      unsigned int tValue = 0;
       int tNumBits = static_cast<int>(aBitset.size());
       for( int iBit = 0; iBit < tNumBits; iBit++ )
       {
@@ -214,7 +215,7 @@ namespace moris::GUI
 
    void reset_active_phases()
    {
-      for (int iG = 0; iG < MAX_GEOMETRIES; iG++)
+      for (unsigned int iG = 0; iG < MAX_GEOMETRIES; iG++)
       {
          gGeomsPhaseToPlot[iG] = PHASE::NONE;
       }
@@ -227,7 +228,7 @@ namespace moris::GUI
     */
    void append_active_phases_from_bitset(const Bitset& aBinary)
    {
-      for (int iG = 0; iG < MAX_GEOMETRIES; iG++)
+      for (unsigned int iG = 0; iG < MAX_GEOMETRIES; iG++)
       {
          if (aBinary[iG] == 1)
          {
@@ -282,7 +283,7 @@ namespace moris::GUI
     */
    void set_all_active_phases_to_negative()
    {
-      for (int iG = 0; iG < MAX_GEOMETRIES; iG++)
+      for (unsigned int iG = 0; iG < MAX_GEOMETRIES; iG++)
       {
          if (gGeomsPhaseToPlot[iG] != PHASE::NONE)
          {
@@ -296,7 +297,7 @@ namespace moris::GUI
     */
    void set_all_active_phases_to_positive()
    {
-      for (int iG = 0; iG < MAX_GEOMETRIES; iG++)
+      for (unsigned int iG = 0; iG < MAX_GEOMETRIES; iG++)
       {
          if (gGeomsPhaseToPlot[iG] != PHASE::NONE)
          {
@@ -403,7 +404,7 @@ namespace moris::GUI
       }
 
       // Expected number of phases depends on number of geometries
-      size_t tExpected = (gNumGeoms >= 0 && gNumGeoms < (int)(8 * sizeof(unsigned int))) ? (1u << gNumGeoms) : 0u;
+      size_t tExpected = (gNumGeoms >= 0 && gNumGeoms < (8 * sizeof(unsigned int))) ? (1u << gNumGeoms) : 0u;
 
       if (tPhase != tExpected)
       {
@@ -459,6 +460,55 @@ namespace moris::GUI
       return load_LS_from_string(tInput);
    }
 
+   // Prompt user for a phase for a given bitset and update shared state.
+   // Runs in a background thread; it takes copies of inputs so it can be detached.
+   void prompt_and_update_phase(unsigned int aPhaseIdx, Bitset aBitset)
+   {
+      // Print prompt showing bitset as +/-
+      std::cout << "Enter a phase for the current bitset (";
+      for (size_t i = 0; i < aBitset.size(); ++i)
+      {
+         std::cout << (aBitset[i] == 1 ? "+" : "-");
+         if (i + 1 < aBitset.size()) std::cout << ",";
+      }
+      std::cout << "): ";
+
+      // Read input (blocking, in background thread)
+      std::string tInput;
+      std::getline(std::cin, tInput);
+
+      int tPhaseValue = 0;
+      try
+      {
+         tInput = trim(tInput);
+         if (!tInput.empty()) tPhaseValue = std::stoi(tInput);
+      }
+      catch (const std::exception &)
+      {
+         std::cerr << "Invalid phase input - ignoring.\n";
+         return;
+      }
+
+      // Update shared phase table safely under the mutex
+      {
+         std::lock_guard<std::mutex> lock(gPhaseTableMutex);
+         // check that the given phase index is appropriate for the number of geometries
+         if (aPhaseIdx < (unsigned int)(1 << gNumGeoms))
+         {
+            gPhaseTable[aPhaseIdx] = tPhaseValue;
+
+            // Ensure the phase is in the list to plot
+            if (std::find(gPhasesToPlot.begin(), gPhasesToPlot.end(), tPhaseValue) == gPhasesToPlot.end())
+               gPhasesToPlot.push_back(tPhaseValue);
+         }
+      }
+
+      // Clear selection and ask main loop to redisplay
+      gSelectedBitset = MORIS_UINT_MAX;
+      gRequestRedisplay.store(true);
+   }
+
+   // Evaluate level-set function at given coordinates
    double eval_LS(LS aLS, double aX, double aY, double aZ = 0.0f)
    {
       // Set global coordinates
@@ -485,24 +535,20 @@ namespace moris::GUI
          return; // don't plot
       }
 
-      // if( aAlpha < 1.0f )
-      // {
-      //    glEnable( GL_BLEND );
-      //    glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
-      // }
-
       glPushMatrix();
 
-      std::vector<double> tXVals = linspace(tXLB, tXUB, NUM_POINTS);
-      std::vector<double> tYVals = linspace(tZLB, tZUB, NUM_POINTS);
+      int tNumPoints = NUM_POINTS / 5;
+
+      std::vector<double> tXVals = linspace(tXLB, tXUB, tNumPoints);
+      std::vector<double> tYVals = linspace(tZLB, tZUB, tNumPoints);
 
       // Draw the surface, splitting triangle strips when vertices don't match sign condition
-      for (int i = 0; i < NUM_POINTS - 1; i++)
+      for (int i = 0; i < tNumPoints - 1; i++)
       {
          bool stripOpen = false;
          double x0 = tXVals[i];
          double x1 = tXVals[i + 1];
-         for (int j = 0; j < NUM_POINTS; j++)
+         for (int j = 0; j < tNumPoints; j++)
          {
             double z = tYVals[j]; // Since OpenGL Y is up, we use Z here. LS function is still (x,y)
             double y0 = eval_LS(aLS, x0, z);
@@ -562,20 +608,15 @@ namespace moris::GUI
 
       glPopMatrix();
 
-      // if( aAlpha < 1.0f )
-      // {
-      //    glDisable( GL_BLEND );
-      // }
-
       ErrCheck("drawLS");
    }
 
    /**
     * Draws only regions that satisfy the bitset for the all the geometries
     */
-   void draw_LS_projection_2D(std::vector<LS> &aLevelSets, std::vector<int> &aBitset, int aColorIndex, unsigned int aTexture = MORIS_UINT_MAX, float aAlpha = 1.0f)
+   void draw_LS_projection_2D(std::vector<LS> &aLevelSets, std::vector<int> &aBitset, int aColorIndex, unsigned int aTexture = MORIS_UINT_MAX)
    {
-      if((int)aBitset.size() != gNumGeoms)
+      if(aBitset.size() != gNumGeoms)
       {         
          Fatal("draw_LS_projection_2D: Bitset size does not match number of level-sets");
       }
@@ -635,8 +676,8 @@ namespace moris::GUI
                   stripOpen = true;
                }
 
-               // Set color (with alpha) for this geometry
-               glColor4d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2], aAlpha);
+               // Set color for this geometry
+               glColor3d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2]);
 
                // Emit vertices with their texture coordinates
                double xi0 = (x0 - tXLB) / (tXUB - tXLB) + tScroll * 0.01;
@@ -684,7 +725,7 @@ namespace moris::GUI
       }
 
       // number of columns (geometries) to display
-      int tNumCols = std::max(1, gNumGeoms);
+      int tNumCols = std::max(1, (int)gNumGeoms);
 
       // helper: measure pixel length of an UTF-8/ASCII string
       auto tPixelLength = [&](const std::string &s) -> int
@@ -795,6 +836,8 @@ namespace moris::GUI
       // Set the plot to be centered at the middle of the domain
       glTranslated((-0.5 * (tXLB + tXUB)), 0.0, (-0.5 * (tZLB + tZUB)));
 
+      glScaled(gScale, gScale, gScale);
+
       //  Flat or smooth shading
       glShadeModel(tSmooth ? GL_SMOOTH : GL_FLAT);
 
@@ -846,7 +889,7 @@ namespace moris::GUI
       {
       case 2:
       {
-         for (int iG = 0; iG < gNumGeoms; iG++)
+         for (unsigned int iG = 0; iG < gNumGeoms; iG++)
          {
             drawLS2D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG, 0.8f);
          }
@@ -854,7 +897,7 @@ namespace moris::GUI
       }
       case 3:
       {
-         for (int iG = 0; iG < gNumGeoms; iG++)
+         for (unsigned int iG = 0; iG < gNumGeoms; iG++)
          {
             drawLS3D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG, 0.8f);
          }
@@ -895,7 +938,7 @@ namespace moris::GUI
       Print("Domain_x=[%f,%f] Domain_z=[%f,%f] Light=%s Lighting type=%s",
             tXLB, tXUB, tZLB, tZUB, tLight ? "On" : "Off", tSmooth ? "Smooth" : "Flat");
 
-      // Print phase table for user reference
+      // Print phase table
       print_phase_table();
 
       //-----------------------------------------------------------
@@ -920,8 +963,9 @@ namespace moris::GUI
          // Disable z-buffering for overlay
          glDisable(GL_DEPTH_TEST);
 
-         // Enable face culling for better performance
-         // glEnable(GL_CULL_FACE);
+         // Enable face culling since we're doing a top-down projection
+         glFrontFace(GL_CW);
+         glEnable(GL_CULL_FACE);
 
          // Reset transformations
          glLoadIdentity();
@@ -932,30 +976,32 @@ namespace moris::GUI
          // Set the plot to be centered at the middle of the domain
          glTranslated((-0.5 * (tXLB + tXUB)), 0.0, (-0.5 * (tZLB + tZUB)));
 
+         glScaled(gScale, gScale, gScale);
+
          // Plot the level-set geometries again, choose the color based on the phase table
-         for( size_t iPhase = 0; iPhase < (size_t)(1 << gNumGeoms);  iPhase++)
+         for( size_t iBitset = 0; iBitset < (size_t)(1 << gNumGeoms);  iBitset++)
          {         
-            if(std::find(gPhasesToPlot.begin(), gPhasesToPlot.end(), gPhaseTable[iPhase]) == gPhasesToPlot.end())
+            if(std::find(gPhasesToPlot.begin(), gPhasesToPlot.end(), gPhaseTable[iBitset]) == gPhasesToPlot.end())
             {
                continue; // skip this phase, not in the list to plot
             }
             
             // Get the bitset for this phase
-            Bitset tBinary = int_to_bitset(iPhase, gNumGeoms);
+            Bitset tBinary = int_to_bitset(iBitset, gNumGeoms);
 
             // Plot each geometry according to the bitset, using the color for this phase
             switch (gSpatialDim)
             {
             case 2:
             {               
-               draw_LS_projection_2D(gLevelSets, tBinary, gPhaseTable[iPhase], iPhase == gSelectedBitset ? gTexture[0] : MORIS_UINT_MAX); // TODO: Wrap the color index around
+               draw_LS_projection_2D(gLevelSets, tBinary, gPhaseTable[iBitset], iBitset == gSelectedBitset ? gTexture[0] : MORIS_UINT_MAX); // TODO: Wrap the color index around
                break;
             }
             case 3:
             {
-               for (int iG = 0; iG < gNumGeoms; iG++)
+               for (unsigned int iG = 0; iG < gNumGeoms; iG++)
                {
-                  drawLS3D(gLevelSets[iG], tBinary[iG] == 1 ? PHASE::POSITIVE : PHASE::NEGATIVE, gPhaseTable[iPhase]); // TODO: Wrap the color index around
+                  drawLS3D(gLevelSets[iG], tBinary[iG] == 1 ? PHASE::POSITIVE : PHASE::NEGATIVE, gPhaseTable[iBitset]); // TODO: Wrap the color index around
                }
                break;
             }
@@ -966,10 +1012,23 @@ namespace moris::GUI
             }
          }
 
-         // Print xtk temp label
+         // Print labels for the viewports
          glColor3f(1.0, 1.0, 1.0);
-         glWindowPos2i(gWidth * 0.82, gHeight * 0.73);
-         Print("XTK Temp Result");
+         if( gProjectionMain )
+         {
+            glWindowPos2i(gWidth / 2 - 100, gHeight - 200);
+            Print("XTK Temp Result");
+
+            glWindowPos2i(gWidth * 0.82, gHeight * 0.7);
+            Print("Level-Set Visualization");
+         }
+         else{
+            glWindowPos2i(gWidth / 2 - 100, gHeight - 200);
+            Print("Level-Set Visualization");
+
+            glWindowPos2i(gWidth * 0.82, gHeight * 0.7);
+            Print("XTK Temp Result");
+         }
 
          // Re-enable all the good stuff
          glEnable(GL_LIGHTING);
@@ -977,7 +1036,7 @@ namespace moris::GUI
          glEnable(GL_DEPTH_TEST);
 
          // Enable face culling for better performance
-         // glDisable(GL_CULL_FACE);
+         glDisable(GL_CULL_FACE);
       }
 
       //-----------------------------------------------------------
@@ -1014,9 +1073,9 @@ namespace moris::GUI
 
    void key(unsigned char ch, int x, int y)
    {
-      if (ch == 'm' || ch == 'M')
+      if( ch == 'm' || ch == 'M' )
       {
-         gMode = 1 - gMode;
+         gMoveLight = 1 - gMoveLight;
       }
       else if (ch == 'l' || ch == 'L')
       {
@@ -1111,7 +1170,7 @@ namespace moris::GUI
       {
          // Delete the current active geometry
          // Shift all geometries after it down by one
-         for (int iG = gActiveGeometry; iG < gNumGeoms - 1; iG++)
+         for (unsigned int iG = gActiveGeometry; iG < gNumGeoms - 1; iG++)
          {
             gLevelSets[iG] = gLevelSets[iG + 1];
             gGeomsPhaseToPlot[iG] = gGeomsPhaseToPlot[iG + 1];
@@ -1125,7 +1184,7 @@ namespace moris::GUI
          gPhasesToPlot = gPhaseTable;
 
          // Plot all phases
-         for (int iG = 0; iG < gNumGeoms; iG++)
+         for (unsigned int iG = 0; iG < gNumGeoms; iG++)
          {
             gGeomsPhaseToPlot[iG] = PHASE::ALL;
          }
@@ -1138,32 +1197,75 @@ namespace moris::GUI
       {
          set_all_active_phases_to_negative();
       }
-      else if (ch == 32) // space bar
+      else if (ch == 'r' || ch == 'R')
       {
-         // Plot all phases
-         for (int iG = 0; iG < gNumGeoms; iG++)
-         {
-            gGeomsPhaseToPlot[iG] = PHASE::ALL;
-         }
-
-         // Deselect any selected bitset
-         gSelectedBitset = MORIS_UINT_MAX;
-
          // Reset phase table
          std::iota(gPhaseTable.begin(), gPhaseTable.end(), 0);
          gPhasesToPlot = gPhaseTable;
       }
+      else if (ch == 32) // space bar
+      {
+         // Plot all regions in the Level-Set visualizer
+         for (unsigned int iG = 0; iG < gNumGeoms; iG++)
+         {
+            gGeomsPhaseToPlot[iG] = PHASE::ALL;
+         }
+
+         // Plot all phases in the projection
+         unsigned int tMaxPhase = *std::max_element(gPhaseTable.begin(), gPhaseTable.end());
+         gPhasesToPlot.resize(tMaxPhase + 1);
+         std::iota(gPhasesToPlot.begin(), gPhasesToPlot.end(), 0);
+
+         // Deselect any selected bitset
+         gSelectedBitset = MORIS_UINT_MAX;
+
+         // Reset active geometry
+         gActiveGeometry = MORIS_UINT_MAX;
+
+
+      }
       else if (ch == 13) // Enter key
       {
-         // Get user input for the current active geometry
-         gLevelSets[gActiveGeometry] = get_LS_user_input();
+         // Both a geometry and a bitset are selected, do whichever is in the main window
+         if( gActiveGeometry != MORIS_UINT_MAX and gSelectedBitset != MORIS_UINT_MAX )
+         {
+            if( gProjectionMain )
+            {
+               unsigned int tPhaseIdxCopy = gSelectedBitset;
+               Bitset tBitsetCopy = int_to_bitset(tPhaseIdxCopy, gNumGeoms);
+               std::thread(prompt_and_update_phase, tPhaseIdxCopy, tBitsetCopy).detach();
+            }
+            else
+            {
+               // Get user input for the current active geometry
+               gLevelSets[gActiveGeometry] = get_LS_user_input();
 
-         // Set to plot this geometry
-         gGeomsPhaseToPlot[gActiveGeometry] = PHASE::ALL;
-         
-         // Reset phase table
-         std::iota(gPhaseTable.begin(), gPhaseTable.end(), 0);
-         gPhasesToPlot = gPhaseTable;
+               // Set to plot this geometry
+               gGeomsPhaseToPlot[gActiveGeometry] = PHASE::ALL;
+               
+               // Reset phase table
+               std::iota(gPhaseTable.begin(), gPhaseTable.end(), 0);
+               gPhasesToPlot = gPhaseTable;
+            }
+         }
+         else if( gActiveGeometry != MORIS_UINT_MAX )         
+         {
+            // Get user input for the current active geometry
+            gLevelSets[gActiveGeometry] = get_LS_user_input();
+
+            // Set to plot this geometry
+            gGeomsPhaseToPlot[gActiveGeometry] = PHASE::ALL;
+            
+            // Reset phase table
+            std::iota(gPhaseTable.begin(), gPhaseTable.end(), 0);
+            gPhasesToPlot = gPhaseTable;
+         }
+         else if( gSelectedBitset != MORIS_UINT_MAX )
+         {
+            unsigned int tPhaseIdxCopy = gSelectedBitset;
+            Bitset tBitsetCopy = int_to_bitset(tPhaseIdxCopy, gNumGeoms);
+            std::thread(prompt_and_update_phase, tPhaseIdxCopy, tBitsetCopy).detach();
+         }
       }
       else if (ch == '/' || ch == '?')
       {
@@ -1174,7 +1276,7 @@ namespace moris::GUI
          gNumGeoms = 3;
 
          // Set to plot all geometries
-         for (int iG = 0; iG < gNumGeoms; iG++)
+         for (unsigned int iG = 0; iG < gNumGeoms; iG++)
          {
             gGeomsPhaseToPlot[iG] = PHASE::ALL;
          }
@@ -1182,7 +1284,7 @@ namespace moris::GUI
          // Set demo phase table
          std::fill(gPhaseTable.begin(), gPhaseTable.end(), -1);
          gPhaseTable[0] = 0;
-         gPhaseTable[1] = 0;
+         gPhaseTable[1] = 2;
          gPhaseTable[2] = 0;
          gPhaseTable[3] = 0;
          gPhaseTable[4] = 1;
@@ -1191,7 +1293,7 @@ namespace moris::GUI
          gPhaseTable[7] = 0;
 
          // Plot all phases
-         gPhasesToPlot = {0,1};
+         gPhasesToPlot = {0,1,2};
       }
       else if (ch == 27) // Escape key
          exit(0);
@@ -1291,6 +1393,8 @@ namespace moris::GUI
       }
 
       tScroll += 1;
+
+      glutPostRedisplay();
    }
 
    /*
@@ -1349,6 +1453,7 @@ namespace moris::GUI
             float tLength = tXUB - tXLB;
             float tCenter = 0.5 * (tXUB + tXLB);
             tLength *= 0.98; // Zoom in by reducing length by 2%
+            gScale = tLength / 2.0; // Update global scale
             tXLB = tCenter - 0.5 * tLength;
             tXUB = tCenter + 0.5 * tLength;
 
@@ -1366,6 +1471,7 @@ namespace moris::GUI
             float tLength = tXUB - tXLB;
             float tCenter = 0.5 * (tXUB + tXLB);
             tLength *= 1.02; // Zoom out by increasing length by 2%
+            gScale = tLength / 2.0; // Update global scale
             tXLB = tCenter - 0.5 * tLength;
             tXUB = tCenter + 0.5 * tLength;
 
@@ -1426,67 +1532,79 @@ namespace moris::GUI
          {
             // Get the bitset for the clicked point
             std::vector<int> tBitset(gNumGeoms);
-            for( int iG = 0; iG < gNumGeoms; iG++ ) {
+            for( unsigned int iG = 0; iG < gNumGeoms; iG++ ) {
                double phi = eval_LS( gLevelSets[iG], wx, wz );
                tBitset[iG] = ( phi >= 0 ) ? 1 : 0;
             }
+
+            unsigned int tPhaseIndex = bitset_to_int( tBitset );
 
             if( gSelectedBitset == MORIS_UINT_MAX )
             {
                // Capture the bitset and phase index by value for the background thread
                std::vector<int> tBitsetCopy = tBitset;
-               int tPhaseIdxCopy = tPhaseIndex;
+               unsigned int tPhaseIdxCopy = tPhaseIndex; 
 
-               std::thread([tPhaseIdxCopy, tBitsetCopy]() mutable 
-               {
-                  // Prompt to get new phase value
-                  std::cout << "Enter a phase for the current bitset (";
-                  for (size_t i = 0; i < tBitsetCopy.size(); ++i)
-                  {
-                     std::cout << (tBitsetCopy[i] == 1 ? "+" : "-");
-                     if (i + 1 < tBitsetCopy.size())
-                        std::cout << ",";
-                  }
-                  std::cout << "): ";
+               // To render texture for this bitset
+               gSelectedBitset = tPhaseIdxCopy;
 
-                  std::string tInput;
-                  std::getline(std::cin, tInput);
+               // std::thread([tPhaseIdxCopy, tBitsetCopy]() mutable 
+               // {
+               //    // Prompt to get new phase value
+               //    std::cout << "Enter a phase for the current bitset (";
+               //    for (size_t i = 0; i < tBitsetCopy.size(); ++i)
+               //    {
+               //       std::cout << (tBitsetCopy[i] == 1 ? "+" : "-");
+               //       if (i + 1 < tBitsetCopy.size())
+               //          std::cout << ",";
+               //    }
+               //    std::cout << "): ";
 
-                  int tPhaseValue = 0;
-                  try
-                  {
-                     tInput = trim(tInput);
-                     if (!tInput.empty())
-                        tPhaseValue = std::stoi(tInput);
-                  }
-                  catch (const std::exception &)
-                  {
-                     std::cerr << "Invalid phase input - ignoring.\n";
-                  }
+               //    std::string tInput;
+               //    std::getline(std::cin, tInput);
 
-                  // Update shared phase table safely
-                  {
-                     std::lock_guard<std::mutex> lock(gPhaseTableMutex);
-                     if (tPhaseIdxCopy >= 0 && tPhaseIdxCopy < (int)gPhaseTable.size())
-                        gPhaseTable[tPhaseIdxCopy] = tPhaseValue;
-                  }
+               //    int tPhaseValue = 0;
+               //    try
+               //    {
+               //       tInput = trim(tInput);
+               //       if (!tInput.empty())
+               //          tPhaseValue = std::stoi(tInput);
+               //    }
+               //    catch (const std::exception &)
+               //    {
+               //       std::cerr << "Invalid phase input - ignoring.\n";
+               //    }
 
-                  // Clear selection and request a redisplay from the main loop
-                  gSelectedBitset = MORIS_UINT_MAX;
-                  gRequestRedisplay.store(true);
-               }).detach();
+               //    // Update shared phase table safely
+               //    {
+               //       std::lock_guard<std::mutex> lock(gPhaseTableMutex);
+               //       if (tPhaseIdxCopy >= 0 && tPhaseIdxCopy < gPhaseTable.size())
+               //       {
+               //          gPhaseTable[tPhaseIdxCopy] = tPhaseValue;
+
+               //          // Update to make sure to plot this phase if not already present
+               //          if( std::find( gPhasesToPlot.begin(), gPhasesToPlot.end(), tPhaseValue ) == gPhasesToPlot.end() )
+               //          {
+               //             gPhasesToPlot.push_back( tPhaseValue );
+               //          }
+               //       }
+               //    }
+
+               //    // Clear selection and request a redisplay from the main loop
+               //    gSelectedBitset = MORIS_UINT_MAX;
+               //    gRequestRedisplay.store(true);
+               // }).detach();
+            }
+            else if(gSelectedBitset == tPhaseIndex)
+            {
+               // Deselect the bitset
+               gSelectedBitset = MORIS_UINT_MAX;
             }
             else 
             {
-               // Get the phase index (to determine color)
-               int tPhaseIndex = bitset_to_int( tBitset );
-
-               // Plot this phase with a texture
+               // Different bitset clicked, assign this as the selected one
                gSelectedBitset = tPhaseIndex;
-               glutPostRedisplay();
             }
-
-
          }
       }
    }
