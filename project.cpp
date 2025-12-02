@@ -59,6 +59,11 @@ namespace moris::GUI
    int gPhi = 20;            // Elevation of view angle
    int gTheta = 0;           // Azimuth of view angle
 
+   // Saved matrices / viewport for accurate gluUnProject (main view)
+   GLdouble gModelviewMain[16];
+   GLdouble gProjectionMainMatrix[16];
+   GLint gViewportMain[4];
+
    //-----------------------------------------------------------
    // Global lighting variables
    //-----------------------------------------------------------
@@ -87,19 +92,20 @@ namespace moris::GUI
    // Global mouse variables
    //-----------------------------------------------------------
 
-   int tMouseX = 0, tMouseY = 0; // Current mouse position
-   int tMouseCaptured = 0;       // Whether mouse is captured for camera control
+   int gMouseX = 0, gMouseY = 0; // Current mouse position
+   int gMouseCaptured = 0;       // Whether mouse is captured for camera control
 
    //-----------------------------------------------------------
    // Global LS variables
    //-----------------------------------------------------------
    int gSpatialDim = 2;                        // Spatial dimension (2D/3D)
-   int tAxes = 1;                              // Display axes or not
-   double tXLB = -1.0;                         // x lower bound
-   double tXUB = 1.0;                          // x upper bound
-   double tZLB = -1.0;                         // z lower bound
-   double tZUB = 1.0;                          // z upper bound
-   double gScale = 1.0;                        // Scale factor for zooming
+   int gAxes = 1;                              // Display axes or not
+   double gXLB = -1.0;                         // x lower bound
+   double gXUB = 1.0;                          // x upper bound
+   double gZLB = -1.0;                         // z lower bound
+   double gZUB = 1.0;                          // z upper bound
+   double gScaleX = 1.0;                       // Scale factor for zooming
+   double gScaleZ = 1.0;                       // Scale factor for zooming
    double gX, gY, gZ;                          // Global coordinates for LS evaluation
    std::vector<LS> gLevelSets(MAX_GEOMETRIES); // Vector of level-set functions
    uint gActiveGeometry = MORIS_UINT_MAX;      // Currently active geometry for user input
@@ -132,7 +138,6 @@ namespace moris::GUI
        {0.0, 1.0, 0.0},
        {0.0, 0.0, 1.0},
        {1.0, 1.0, 0.0},
-       {1.0, 0.0, 0.0},
        {0.0, 1.0, 1.0},
        {1.0, 0.0, 1.0},
        {0.5, 0.5, 0.5},
@@ -763,9 +768,9 @@ namespace moris::GUI
                glColor3d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2]);
 
                // Emit vertices with their texture coordinates
-               double xi0 = (gXVals[i] - tXLB) / (tXUB - tXLB) + gScroll * 0.01;
-               double xi1 = (gXVals[i + 1] - tXLB) / (tXUB - tXLB) + gScroll * 0.01;
-               double eta = (gZVals[j] - tZLB) / (tZUB - tZLB);
+               double xi0 = (gXVals[i] - gXLB) / (gXUB - gXLB) + gScroll * 0.01;
+               double xi1 = (gXVals[i + 1] - gXLB) / (gXUB - gXLB) + gScroll * 0.01;
+               double eta = (gZVals[j] - gZLB) / (gZUB - gZLB);
 
                glTexCoord2d(xi0, eta);
                glVertex3d(gXVals[i], y0_vals[0][i][j], gZVals[j]);
@@ -835,13 +840,13 @@ namespace moris::GUI
 
       // Emit four vertices, each preceded by its texcoord (correct ordering)
       glBegin(GL_QUADS);
-      glTexCoord2d(0.0 + gScroll, 0.0);
+      glTexCoord2d(0.0 + gScroll * 0.01, 0.0);
       glVertex2i(aX, aY);
-      glTexCoord2d(1.0 + gScroll, 0.0);
+      glTexCoord2d(1.0 + gScroll * 0.01, 0.0);
       glVertex2i(aX + w, aY);
-      glTexCoord2d(1.0 + gScroll, 1.0);
+      glTexCoord2d(1.0 + gScroll * 0.01, 1.0);
       glVertex2i(aX + w, aY + h);
-      glTexCoord2d(0.0 + gScroll, 1.0);
+      glTexCoord2d(0.0 + gScroll * 0.01, 1.0);
       glVertex2i(aX, aY + h);
       glEnd();
 
@@ -988,18 +993,18 @@ namespace moris::GUI
          glViewport(gWidth * 0.7, gHeight * 0.7, gProjWidth, gProjHeight);
       }
 
-      // Reset transformations
+      // Build transforms so rotate/scale occur about the domain center.
+      glMatrixMode(GL_MODELVIEW);
+      glPushMatrix(); // save previous MODELVIEW
       glLoadIdentity();
+      double tCenterX = 0.5 * (gXLB + gXUB);
+      double tCenterZ = 0.5 * (gZLB + gZUB);
 
-      // Apply rotations
+      // Transform sequence: translate to center, rotate, scale, translate back.
+      glTranslated(-tCenterX, 0.0, -tCenterZ);
       glRotated(gPhi, 1.0, 0.0, 0.0);
       glRotated(gTheta, 0.0, 1.0, 0.0);
-
-      // Set the plot to be centered at the middle of the domain
-      glTranslated((-0.5 * (tXLB + tXUB)), 0.0, (-0.5 * (tZLB + tZUB)));
-
-      // Apply scaling
-      glScaled(gScale, gScale, gScale);
+      glScaled(gScaleX, 1.0, gScaleZ);
 
       //  Flat or smooth shading
       glShadeModel(tSmooth ? GL_SMOOTH : GL_FLAT);
@@ -1065,7 +1070,7 @@ namespace moris::GUI
       glDisable(GL_LIGHTING);   // No lighting for axes and text
       glDisable(GL_TEXTURE_2D); // No textures for axes and text
       glColor3f(1, 1, 1);       // white
-      if (tAxes)
+      if (gAxes)
       {
          //  Draw axes in white
          glBegin(GL_LINES);
@@ -1085,11 +1090,13 @@ namespace moris::GUI
          Print("Y");
       }
 
+      glPopMatrix();
+
       // Display settings
       glColor3f(1.0, 1.0, 1.0);
       glWindowPos2i(5, 25);
       Print("Domain_x=[%f,%f] Domain_z=[%f,%f] Light=%s Lighting type=%s",
-            tXLB, tXUB, tZLB, tZUB, tLight ? "On" : "Off", tSmooth ? "Smooth" : "Flat");
+            gXLB, gXUB, gZLB, gZUB, tLight ? "On" : "Off", tSmooth ? "Smooth" : "Flat");
 
       //-----------------------------------------------------------
       // Viewport 2 (projection, top-down view)
@@ -1117,19 +1124,22 @@ namespace moris::GUI
          glDisable(GL_DEPTH_TEST);
 
          // Enable face culling since we're doing a top-down projection
-         glFrontFace(GL_CW);
+         glFrontFace(GL_CCW);
          glEnable(GL_CULL_FACE);
 
-         // Reset transformations
+         glPushMatrix();
+
+         // Use MODELVIEW stack and transform about the domain center
+         glMatrixMode(GL_MODELVIEW);
+
          glLoadIdentity();
+         double tCenterX = 0.5 * (gXLB + gXUB);
+         double tCenterZ = 0.5 * (gZLB + gZUB);
 
-         // Set top-down view
-         glRotated(90, 1.0, 0.0, 0.0);
-
-         // Set the plot to be centered at the middle of the domain
-         glTranslated((-0.5 * (tXLB + tXUB)), 0.0, (-0.5 * (tZLB + tZUB)));
-
-         glScaled(gScale, gScale, gScale);
+         // Move to center, apply top-down rotation and scale, then move back
+         glTranslated(-tCenterX, 0.0, -tCenterZ);
+         glRotated(-90.0, 1.0, 0.0, 0.0);
+         glScaled(gScaleX, 1.0, gScaleZ);
 
          // Plot the level-set geometries again, choose the color based on the phase table
          for (size_t iBitset = 0; iBitset < (size_t)(1 << gNumGeoms); iBitset++)
@@ -1175,6 +1185,11 @@ namespace moris::GUI
 
             glWindowPos2i(gWidth * 0.82, gHeight * 0.7);
             Print("Level-Set Visualization");
+
+            // Save matrices & viewport for accurate picking (use the exact matrices used for drawing)
+            glGetDoublev(GL_MODELVIEW_MATRIX, gModelviewMain);
+            glGetDoublev(GL_PROJECTION_MATRIX, gProjectionMainMatrix);
+            glGetIntegerv(GL_VIEWPORT, gViewportMain);
          }
          else
          {
@@ -1184,6 +1199,8 @@ namespace moris::GUI
             glWindowPos2i(gWidth * 0.82, gHeight * 0.7);
             Print("XTK Temp Result");
          }
+
+         glPopMatrix();
 
          // Re-enable all the good stuff
          glEnable(GL_LIGHTING);
@@ -1239,7 +1256,7 @@ namespace moris::GUI
       }
       else if (ch == 'a' || ch == 'A')
       {
-         tAxes = 1 - tAxes;
+         gAxes = 1 - gAxes;
       }
       else if (ch == 'q' || ch == 'Q')
       {
@@ -1419,7 +1436,8 @@ namespace moris::GUI
       {
          // Load demo level-set functions
          gLevelSets[0] = load_LS_from_string("sin(0.43*x)+cos(y)-1");
-         gLevelSets[1] = load_LS_from_string("sin(x)-1.2*cos(y)+1");
+         // gLevelSets[1] = load_LS_from_string("sin(x)-1.2*cos(y)+1");
+         gLevelSets[1] = load_LS_from_string("3*x+y-1");
          gLevelSets[2] = load_LS_from_string("x^2+y^2-1");
          gNumGeoms = 3;
 
@@ -1545,31 +1563,54 @@ namespace moris::GUI
     */
    void motion(int x, int y)
    {
-      if (tMouseCaptured)
+      if (gMouseCaptured)
       {
          // Calculate mouse movement
-         int deltaX = x - tMouseX;
-         int deltaY = y - tMouseY;
+         int deltaX = x - gMouseX;
+         int deltaY = y - gMouseY;
 
-         // Update angles based on mouse movement
-         gTheta += deltaX * 0.1; // Horizontal movement controls azimuth (yaw)
-         gPhi += deltaY * 0.1;   // Vertical movement controls elevation (pitch)
+         if (gProjectionMain)
+         {
+            // Pan the view based on mouse movement
+            double tPanSpeedX = 0.01 / gScaleX; // Adjust pan speed based on zoom level
+            double tPanSpeedZ = 0.01 / gScaleZ; // Adjust pan speed based on zoom level
 
-         // Keep phi within reasonable bounds
-         if (gPhi > 89)
-            gPhi = 89;
-         if (gPhi < -89)
-            gPhi = -89;
+            double tCenterX = 0.5 * (gXLB + gXUB);
+            double tCenterZ = 0.5 * (gZLB + gZUB);
 
-         // Wrap theta around 360 degrees
-         if (gTheta > 360)
-            gTheta -= 360;
-         if (gTheta < 0)
-            gTheta += 360;
+            tCenterX -= deltaX * tPanSpeedX;
+            tCenterZ += deltaY * tPanSpeedZ;
+
+            gXLB = tCenterX - 0.5 * (gXUB - gXLB);
+            gXUB = tCenterX + 0.5 * (gXUB - gXLB);
+            gZLB = tCenterZ - 0.5 * (gZUB - gZLB);
+            gZUB = tCenterZ + 0.5 * (gZUB - gZLB);
+
+            linspace(gXVals, gXLB, gXUB);
+            linspace(gZVals, gZLB, gZUB);
+         }
+         else
+         {
+            // Update angles based on mouse movement
+            gTheta += deltaX * 0.1; // Horizontal movement controls azimuth (yaw)
+            gPhi += deltaY * 0.1;   // Vertical movement controls elevation (pitch)
+
+            // Keep phi within reasonable bounds
+            if (gPhi > 89)
+               gPhi = 89;
+            if (gPhi < -89)
+               gPhi = -89;
+
+            // Wrap theta around 360 degrees
+            if (gTheta > 360)
+               gTheta -= 360;
+            if (gTheta < 0)
+               gTheta += 360;
+         }
 
          // Store current mouse position
-         tMouseX = x;
-         tMouseY = y;
+         gMouseX = x;
+         gMouseY = y;
 
          // Apply projection based on the current mode
          Project(0, gAsp, gDim);
@@ -1591,36 +1632,38 @@ namespace moris::GUI
 
          if (button == 3) // Scroll up - make the plotting domain smaller
          {
-            float tLength = tXUB - tXLB;
-            float tCenter = 0.5 * (tXUB + tXLB);
-            tLength *= 0.98;        // Zoom in by reducing length by 2%
-            gScale = tLength / 2.0; // Update global scale
-            tXLB = tCenter - 0.5 * tLength;
-            tXUB = tCenter + 0.5 * tLength;
-
-            tLength = tZUB - tZLB;
-            tCenter = 0.5 * (tZUB + tZLB);
+            float tLength = gXUB - gXLB;
+            float tCenter = 0.5 * (gXUB + gXLB);
             tLength *= 0.98; // Zoom in by reducing length by 2%
-            tZLB = tCenter - 0.5 * tLength;
-            tZUB = tCenter + 0.5 * tLength;
+            gXLB = tCenter - 0.5 * tLength;
+            gXUB = tCenter + 0.5 * tLength;
+            gScaleX = 2.0 / (gXUB - gXLB); // Update global scale
+            gScaleZ = 2.0 / (gZUB - gZLB); // Update global scale
+
+            tLength = gZUB - gZLB;
+            tCenter = 0.5 * (gZUB + gZLB);
+            tLength *= 0.98; // Zoom in by reducing length by 2%
+            gZLB = tCenter - 0.5 * tLength;
+            gZUB = tCenter + 0.5 * tLength;
 
             // Scale the projection y so that the aspect ratio is maintained
             gProjY = tLength;
          }
          else if (button == 4) // Scroll down - zoom out
          {
-            float tLength = tXUB - tXLB;
-            float tCenter = 0.5 * (tXUB + tXLB);
-            tLength *= 1.02;        // Zoom out by increasing length by 2%
-            gScale = tLength / 2.0; // Update global scale
-            tXLB = tCenter - 0.5 * tLength;
-            tXUB = tCenter + 0.5 * tLength;
-
-            tLength = tZUB - tZLB;
-            tCenter = 0.5 * (tZUB + tZLB);
+            float tLength = gXUB - gXLB;
+            float tCenter = 0.5 * (gXUB + gXLB);
             tLength *= 1.02; // Zoom out by increasing length by 2%
-            tZLB = tCenter - 0.5 * tLength;
-            tZUB = tCenter + 0.5 * tLength;
+            gXLB = tCenter - 0.5 * tLength;
+            gXUB = tCenter + 0.5 * tLength;
+            gScaleX = 2.0 / (gXUB - gXLB); // Update global scale
+            gScaleZ = 2.0 / (gZUB - gZLB); // Update global scale
+
+            tLength = gZUB - gZLB;
+            tCenter = 0.5 * (gZUB + gZLB);
+            tLength *= 1.02; // Zoom out by increasing length by 2%
+            gZLB = tCenter - 0.5 * tLength;
+            gZUB = tCenter + 0.5 * tLength;
          }
 
          // Update the projection
@@ -1635,42 +1678,38 @@ namespace moris::GUI
          if (state == GLUT_DOWN)
          {
             // Capture mouse for camera control
-            tMouseCaptured = 1;
-            tMouseX = x;
-            tMouseY = y;
+            gMouseCaptured = 1;
+            gMouseX = x;
+            gMouseY = y;
             glutSetCursor(GLUT_CURSOR_NONE); // Hide cursor
          }
          else
          {
             // Release mouse capture
-            tMouseCaptured = 0;
+            gMouseCaptured = 0;
             glutSetCursor(GLUT_CURSOR_INHERIT); // Show cursor
          }
       }
       else if (button == GLUT_RIGHT_BUTTON && state == GLUT_DOWN && gProjectionMain)
       {
          // Convert the x,y screen coordinates to world coordinates at near plane
-         GLint viewport[4];
-         GLdouble modelview[16], projection[16];
          GLdouble wx, wy, wz;
 
-         glGetIntegerv(GL_VIEWPORT, viewport);
-         glGetDoublev(GL_MODELVIEW_MATRIX, modelview);
-         glGetDoublev(GL_PROJECTION_MATRIX, projection);
-
-         // Flip y because OpenGL's origin is bottom-left
+         // Convert to double
          double mouse_x = x;
          double mouse_y = y;
 
          gluUnProject(mouse_x, mouse_y, 0.0,
-                      modelview, projection, viewport,
+                      gModelviewMain, gProjectionMainMatrix, gViewportMain,
                       &wx, &wy, &wz);
 
+         wz = -wz; // Invert y to match OpenGL coordinate system
+
          // Check if the click was inside the plotting domain
-         if (wx > tXLB && wx < tXUB && wz > tZLB && wz < tZUB)
+         if (wx > gXLB && wx < gXUB && wz > gZLB && wz < gZUB)
          {
             // Get the bitset for the clicked point
-            std::vector<int> tBitset(gNumGeoms);
+            Bitset tBitset(gNumGeoms);
             for (uint iG = 0; iG < gNumGeoms; iG++)
             {
                double phi = eval_LS(gLevelSets[iG], wx, wz);
@@ -1682,7 +1721,7 @@ namespace moris::GUI
             if (gSelectedBitset == MORIS_UINT_MAX)
             {
                // Capture the bitset and phase index by value for the background thread
-               std::vector<int> tBitsetCopy = tBitset;
+               Bitset tBitsetCopy = tBitset;
                uint tPhaseIdxCopy = tPhaseIndex;
 
                // To render texture for this bitset
@@ -1708,8 +1747,8 @@ namespace moris::GUI
 int main(int argc, char *argv[])
 {
    // Compute the spatial grid
-   moris::GUI::linspace(moris::GUI::gXVals, moris::GUI::tXLB, moris::GUI::tXUB);
-   moris::GUI::linspace(moris::GUI::gZVals, moris::GUI::tZLB, moris::GUI::tZUB);
+   moris::GUI::linspace(moris::GUI::gXVals, moris::GUI::gXLB, moris::GUI::gXUB);
+   moris::GUI::linspace(moris::GUI::gZVals, moris::GUI::gZLB, moris::GUI::gZUB);
 
    //  Initialize GLUT
    glutInit(&argc, argv);
