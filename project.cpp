@@ -82,7 +82,6 @@ namespace moris::GUI
    //-----------------------------------------------------------
    // Global texture variables
    //-----------------------------------------------------------
-   int gTextures = 0;        // Texture on or off
    unsigned int gTexture[1]; //  Texture names
    int tScroll = 0;            // Texture scrolling in idle
 
@@ -107,6 +106,9 @@ namespace moris::GUI
    std::vector<LS> gLevelSets(MAX_GEOMETRIES); // Vector of level-set functions
    unsigned int gActiveGeometry = MORIS_UINT_MAX;       // Currently active geometry for user input
    unsigned int gNumGeoms = 0;                          // Number of geometries defined
+
+   std::vector<double> gXVals(NUM_POINTS); // X values for grid
+   std::vector<double> gZVals(NUM_POINTS); // Z values for grid
 
    //-----------------------------------------------------------
    // Global phase variables
@@ -158,13 +160,14 @@ namespace moris::GUI
    //-----------------------------------------------------------------------
 
    // For generating sampling points
-   std::vector<double> linspace(double start, double end, int num)
+   void linspace(std::vector< double >& aVec, double start, double end)
    {
-      std::vector<double> arr(num);
+      unsigned int num = aVec.size();
       double step = (end - start) / (num - 1);
-      for (int i = 0; i < num; i++)
-         arr[i] = start + i * step;
-      return arr;
+      for (unsigned int i = 0; i < num; i++)
+      { 
+         aVec[i] = start + i * step;
+      }
    }
 
    /*
@@ -509,7 +512,7 @@ namespace moris::GUI
    }
 
    // Evaluate level-set function at given coordinates
-   double eval_LS(LS aLS, double aX, double aY, double aZ = 0.0f)
+   double eval_LS(const LS& aLS, double aX, double aY, double aZ = 0.0f)
    {
       // Set global coordinates
       gX = aX;
@@ -520,14 +523,14 @@ namespace moris::GUI
       return aLS.value();
    }
 
-   void drawLS3D(LS aLS, PHASE aSign, int aColorIndex, float aAlpha = 1.0f)
+   void drawLS3D(const LS& aLS, PHASE aSign, int aColorIndex)
    {
       // TODO
 
       Fatal("drawLS3D not implemented yet");
    }
 
-   void drawLS2D(LS aLS, PHASE aSign, int aColorIndex, float aAlpha = 1.0f)
+   void drawLS2D(const LS& aLS, PHASE aSign, int aColorIndex)
    {
       // Check if we need to plot this geometry
       if (aSign == PHASE::NONE)
@@ -537,22 +540,35 @@ namespace moris::GUI
 
       glPushMatrix();
 
-      int tNumPoints = NUM_POINTS / 5;
+      // Reduce number of points for faster rendering
+      int tReductionFactor = 5;
+      int tNumPoints = NUM_POINTS / tReductionFactor;
+      // double tEps = (tXUB - tXLB) / (double)(tNumPoints - 1);
 
-      std::vector<double> tXVals = linspace(tXLB, tXUB, tNumPoints);
-      std::vector<double> tYVals = linspace(tZLB, tZUB, tNumPoints);
+      std::vector<std::vector<double>> tPhiVals(tNumPoints, std::vector<double>(tNumPoints, 0.0));
 
-      // Draw the surface, splitting triangle strips when vertices don't match sign condition
-      for (int i = 0; i < tNumPoints - 1; i++)
+      // Evaluate level-set function at grid points
+      for (int i = 0; i < NUM_POINTS; i = i + 5)
       {
-         bool stripOpen = false;
-         double x0 = tXVals[i];
-         double x1 = tXVals[i + 1];
+         double x = gXVals[i];
          for (int j = 0; j < tNumPoints; j++)
          {
-            double z = tYVals[j]; // Since OpenGL Y is up, we use Z here. LS function is still (x,y)
-            double y0 = eval_LS(aLS, x0, z);
-            double y1 = eval_LS(aLS, x1, z);
+            double z = gZVals[j];
+            tPhiVals[i][j] = eval_LS(aLS, x, z);
+         }
+      }
+
+      // Draw the surface, splitting triangle strips when vertices don't match sign condition
+      for (int i = 0; i < tNumPoints - 1; i = i + tReductionFactor)
+      {
+         bool stripOpen = false;
+         double x0 = gXVals[i];
+         double x1 = gXVals[i + 1];
+         for (int j = 0; j < tNumPoints; j = j + tReductionFactor)
+         {
+            double z = gZVals[j]; // Since OpenGL Y is up, we use Z here. LS function is still (x,y)
+            double y0 = tPhiVals[i][j];
+            double y1 = tPhiVals[i+1][j];
 
             bool tValid0 = !((aSign == PHASE::POSITIVE && y0 < 0) || (aSign == PHASE::NEGATIVE && y0 > 0));
             bool tValid1 = !((aSign == PHASE::POSITIVE && y1 < 0) || (aSign == PHASE::NEGATIVE && y1 > 0));
@@ -567,10 +583,10 @@ namespace moris::GUI
                }
 
                // Set color (with alpha) for this geometry
-               glColor4d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2], aAlpha);
+               glColor3d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2]);
 
                // Finite difference normals (forward FD for efficiency)
-               // TODO: Overload parser to get automatic derivatives
+               // TODO: Compute normals using the cached LS values instead of re-evaluating
                double tEps = 1e-8;                       // FD step size
                double tdPhidx0 = eval_LS(aLS, x0 + tEps, z);
                double tdPhidx1 = eval_LS(aLS, x1 + tEps, z);
@@ -631,38 +647,44 @@ namespace moris::GUI
 
       glPushMatrix();
 
-      std::vector<double> tXVals = linspace(tXLB, tXUB, NUM_POINTS);
-      std::vector<double> tYVals = linspace(tZLB, tZUB, NUM_POINTS);
+      // Need to evaluate all level-sets at each vertex
+      std::vector<std::vector<std::vector<double>>> y0_vals( aLevelSets.size(), std::vector<std::vector<double>>( NUM_POINTS, std::vector<double>(NUM_POINTS )));
+      std::vector<std::vector<std::vector<double>>> y1_vals( aLevelSets.size(), std::vector<std::vector<double>>( NUM_POINTS, std::vector<double>( NUM_POINTS )));
+
+      // Evaluate all level-sets at each vertex
+      for( size_t iG = 0; iG < aLevelSets.size(); iG++ )
+      {
+         for( int iX = 0; iX < NUM_POINTS; iX++ )
+         {
+            double x = gXVals[iX];
+            for( int iY = 0; iY < NUM_POINTS; iY++ )
+            {
+               double z = gZVals[iY];
+               y0_vals[iG][iX][iY] = eval_LS( aLevelSets[iG], x, z );
+               y1_vals[iG][iX][iY] = eval_LS( aLevelSets[iG], x, z );
+            }
+         }
+      }
 
       // Draw the surface, splitting triangle strips when vertices don't match sign condition
       for (int i = 0; i < NUM_POINTS - 1; i++)
       {
          bool stripOpen = false;
-         double x0 = tXVals[i];
-         double x1 = tXVals[i + 1];
          for (int j = 0; j < NUM_POINTS; j++)
          {
-            double z = tYVals[j]; // Since OpenGL Y is up, we use Z here. LS function is still (x,y)
-
-            // Need to evaluate all level set fields at this point
-            std::vector<double> y0_vals(aLevelSets.size());
-            std::vector<double> y1_vals(aLevelSets.size());
             bool tValid0 = true;
             bool tValid1 = true;
             for( size_t iG = 0; iG < aLevelSets.size(); iG++ )
             {
-               y0_vals[iG] = eval_LS( aLevelSets[iG], x0, z );
-               y1_vals[iG] = eval_LS( aLevelSets[iG], x1, z );
-
                // Check validity for vertex 0
-               if( ( aBitset[iG] == 1 && y0_vals[iG] < 0 ) ||
-                     ( aBitset[iG] == 0 && y0_vals[iG] > 0 ) )
+               if( ( aBitset[iG] == 1 && y0_vals[iG][i][j] < 0 ) ||
+                     ( aBitset[iG] == 0 && y0_vals[iG][i][j] > 0 ) )
                   {
                   tValid0 = false;
                }
                // Check validity for vertex 1
-               if( ( aBitset[iG] == 1 && y1_vals[iG] < 0 ) ||
-                   ( aBitset[iG] == 0 && y1_vals[iG] > 0 ) )
+               if( ( aBitset[iG] == 1 && y1_vals[iG][i+1][j] < 0 ) ||
+                   ( aBitset[iG] == 0 && y1_vals[iG][i+1][j] > 0 ) )
                {
                   tValid1 = false;
                }
@@ -680,14 +702,14 @@ namespace moris::GUI
                glColor3d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2]);
 
                // Emit vertices with their texture coordinates
-               double xi0 = (x0 - tXLB) / (tXUB - tXLB) + tScroll * 0.01;
-               double xi1 = (x1 - tXLB) / (tXUB - tXLB) + tScroll * 0.01;
-               double eta = (z - tZLB) / (tZUB - tZLB); 
+               double xi0 = (gXVals[i] - tXLB) / (tXUB - tXLB) + tScroll * 0.01;
+               double xi1 = (gXVals[i+1] - tXLB) / (tXUB - tXLB) + tScroll * 0.01;
+               double eta = (gZVals[j] - tZLB) / (tZUB - tZLB); 
 
                glTexCoord2d(xi0, eta);
-               glVertex3d(x0, y0_vals[0], z);
+               glVertex3d(gXVals[i], y0_vals[0][i][j], gZVals[j]);
                glTexCoord2d(xi1, eta);
-               glVertex3d(x1, y1_vals[0], z);
+               glVertex3d(gXVals[i+1], y1_vals[0][i+1][j], gZVals[j]);
             }
             else
             {
@@ -875,23 +897,13 @@ namespace moris::GUI
       else
          glDisable(GL_LIGHTING);
 
-      if (gTextures)
-      {
-         glEnable(GL_TEXTURE_2D);
-         glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-      }
-      else
-         glDisable(GL_TEXTURE_2D);
-
       switch (gSpatialDim)
       {
       case 2:
       {
          for (unsigned int iG = 0; iG < gNumGeoms; iG++)
          {
-            drawLS2D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG, 0.8f);
+            drawLS2D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG);
          }
          break;
       }
@@ -899,7 +911,7 @@ namespace moris::GUI
       {
          for (unsigned int iG = 0; iG < gNumGeoms; iG++)
          {
-            drawLS3D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG, 0.8f);
+            drawLS3D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG);
          }
          break;
       }
@@ -1089,10 +1101,6 @@ namespace moris::GUI
       {
          tAxes = 1 - tAxes;
       }
-      else if (ch == 't' || ch == 'T')
-      {
-         gTextures = 1 - gTextures;
-      }
       else if (ch == 'q' || ch == 'Q' )
       {
          gProjectionMain = not gProjectionMain;
@@ -1221,8 +1229,6 @@ namespace moris::GUI
 
          // Reset active geometry
          gActiveGeometry = MORIS_UINT_MAX;
-
-
       }
       else if (ch == 13) // Enter key
       {
@@ -1547,53 +1553,6 @@ namespace moris::GUI
 
                // To render texture for this bitset
                gSelectedBitset = tPhaseIdxCopy;
-
-               // std::thread([tPhaseIdxCopy, tBitsetCopy]() mutable 
-               // {
-               //    // Prompt to get new phase value
-               //    std::cout << "Enter a phase for the current bitset (";
-               //    for (size_t i = 0; i < tBitsetCopy.size(); ++i)
-               //    {
-               //       std::cout << (tBitsetCopy[i] == 1 ? "+" : "-");
-               //       if (i + 1 < tBitsetCopy.size())
-               //          std::cout << ",";
-               //    }
-               //    std::cout << "): ";
-
-               //    std::string tInput;
-               //    std::getline(std::cin, tInput);
-
-               //    int tPhaseValue = 0;
-               //    try
-               //    {
-               //       tInput = trim(tInput);
-               //       if (!tInput.empty())
-               //          tPhaseValue = std::stoi(tInput);
-               //    }
-               //    catch (const std::exception &)
-               //    {
-               //       std::cerr << "Invalid phase input - ignoring.\n";
-               //    }
-
-               //    // Update shared phase table safely
-               //    {
-               //       std::lock_guard<std::mutex> lock(gPhaseTableMutex);
-               //       if (tPhaseIdxCopy >= 0 && tPhaseIdxCopy < gPhaseTable.size())
-               //       {
-               //          gPhaseTable[tPhaseIdxCopy] = tPhaseValue;
-
-               //          // Update to make sure to plot this phase if not already present
-               //          if( std::find( gPhasesToPlot.begin(), gPhasesToPlot.end(), tPhaseValue ) == gPhasesToPlot.end() )
-               //          {
-               //             gPhasesToPlot.push_back( tPhaseValue );
-               //          }
-               //       }
-               //    }
-
-               //    // Clear selection and request a redisplay from the main loop
-               //    gSelectedBitset = MORIS_UINT_MAX;
-               //    gRequestRedisplay.store(true);
-               // }).detach();
             }
             else if(gSelectedBitset == tPhaseIndex)
             {
@@ -1614,6 +1573,10 @@ namespace moris::GUI
 // Main
 int main(int argc, char *argv[])
 {
+   // Compute the spatial grid
+   moris::GUI::linspace(moris::GUI::gXVals, moris::GUI::tXLB, moris::GUI::tXUB);
+   moris::GUI::linspace(moris::GUI::gZVals, moris::GUI::tZLB, moris::GUI::tZUB);
+   
    //  Initialize GLUT
    glutInit(&argc, argv);
    //  Request double buffered true color window without Z-buffer
