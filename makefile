@@ -6,7 +6,7 @@ all: $(EXE)
 
 #  Msys/MinGW
 ifeq "$(OS)" "Windows_NT"
-CFLG=-O3 -Wall -DUSEGLEW
+CFLG=-O3 -Wall -DUSEGLEW -Wa,-mbig-obj
 LIBS=-lfreeglut -lglew32 -lglu32 -lopengl32 -lm
 CLEAN=rm -f *.exe *.o *.a
 else
@@ -38,13 +38,13 @@ CSCIx229.a:fatal.o errcheck.o print.o loadtexbmp.o loadobj.o projection.o
 
 # Compile rules
 .c.o:
-	gcc-13 -c $(CFLG)  $<
+	gcc -c $(CFLG)  $<
 .cpp.o:
-	g++-13 -c $(CFLG)  $<
+	g++ -c $(CFLG)  $<
 
 #  Link
 project:project.o   CSCIx229.a
-	g++-13 $(CFLG) -o $@ $^  $(LIBS)
+	g++ $(CFLG) -o $@ $^  $(LIBS)
 
 #  Clean
 clean:
