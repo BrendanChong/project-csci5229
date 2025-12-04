@@ -55,7 +55,7 @@ namespace moris::GUI
    //-----------------------------------------------------------
 
    double gAsp = 16.0 / 9.0; // Aspect ratio
-   double gDim = 1.7;        // Size of the world
+   double gDim = 2.0;        // Size of the world
    int gPhi = 20;            // Elevation of view angle
    int gTheta = 0;           // Azimuth of view angle
 
@@ -67,20 +67,20 @@ namespace moris::GUI
    //-----------------------------------------------------------
    // Global lighting variables
    //-----------------------------------------------------------
-   int tLight = 1;     // Lighting on or off
-   int tSmooth = 1;    // Smooth/Flat shading
-   int gMoveLight = 0; // Move light in idle or not
+   int gLight = 1;     // Lighting on or off
+   int gSmooth = 1;    // Smooth/Flat shading
+   int gMoveLight = 1; // Move light in idle or not
 
-   int tDistance = 5;  // Light distance
-   int tInc = 10;      // Ball increment
-   int gEmission = 0;  // Emission intensity (%)
-   int gAmbient = 5;   // Ambient intensity (%)
-   int gDiffuse = 50;  // Diffuse intensity (%)
-   int gSpecular = 5;  // Specular intensity (%)
-   int gShininess = 0; // Shininess (power of two)
-   double tShiny = 1;  // Shininess (value)
-   int tZeta = 90;     // Light azimuth
-   float tYLight = 5;  // Elevation of light
+   int gDistance = 2;       // Light distance
+   int gBallIncrement = 10; // Ball increment
+   int gEmission = 0;       // Emission intensity (%)
+   int gAmbient = 5;        // Ambient intensity (%)
+   int gDiffuse = 50;       // Diffuse intensity (%)
+   int gSpecular = 30;      // Specular intensity (%)
+   int gShininess = 0;      // Shininess (power of two)
+   double gShiny = 1;       // Shininess (value)
+   int gZeta = 160;         // Light azimuth
+   float gYLight = 1;       // Elevation of light
 
    //-----------------------------------------------------------
    // Global texture variables
@@ -116,7 +116,7 @@ namespace moris::GUI
 
    std::mutex gLevelSetMutex; // Mutex to protect level-set updates from background input threads
 
-   bool gIsocontour = true;                                                                      // Flag to plot isocontour points
+   bool gIsocontour = true; // Flag to plot isocontour points
 
    //-----------------------------------------------------------
    // Global phase variables
@@ -411,17 +411,17 @@ namespace moris::GUI
       float yellow[] = {1.0, 1.0, 0.0, 1.0};
       float Emission[] = {0.0, 0.0, (float)0.01 * gEmission, 1.0};
       glColor3f(1, 1, 1);
-      glMaterialf(GL_FRONT, GL_SHININESS, tShiny);
+      glMaterialf(GL_FRONT, GL_SHININESS, gShiny);
       glMaterialfv(GL_FRONT, GL_SPECULAR, yellow);
       glMaterialfv(GL_FRONT, GL_EMISSION, Emission);
       //  Bands of latitude
-      for (int ph = -90; ph < 90; ph += tInc)
+      for (int ph = -90; ph < 90; ph += gBallIncrement)
       {
          glBegin(GL_QUAD_STRIP);
-         for (int th = 0; th <= 360; th += 2 * tInc)
+         for (int th = 0; th <= 360; th += 2 * gBallIncrement)
          {
             Vertex(th, ph);
-            Vertex(th, ph + tInc);
+            Vertex(th, ph + gBallIncrement);
          }
          glEnd();
       }
@@ -673,7 +673,7 @@ namespace moris::GUI
 
       std::vector<std::vector<double>> tPhiVals(tNumPoints, std::vector<double>(tNumPoints));
 
-      // Evaluate level-set function at grid points
+      // Evaluate level-set function at grid points, finite difference to get the normals for these points
       for (int i = 0; i < tNumPoints; i++)
       {
          double x = gXVals[i * tReductionFactor];
@@ -683,6 +683,9 @@ namespace moris::GUI
             tPhiVals[i][j] = eval_LS(aLS, x, z, gZ);
          }
       }
+
+      // Normal y component (down) for every vertex
+      double ny = -1.0;
 
       // Draw the surface, splitting triangle strips when vertices don't match sign condition
       for (int i = 0; i < tNumPoints - 1; i++)
@@ -719,22 +722,22 @@ namespace moris::GUI
                if (tValid0 && tValid1)
                {
                   // both vertices are in the desired plotting domain
-                  double tdPhidx0 = eval_LS(aLS, x0 + tEps, z, gZ);
-                  double tdPhidx1 = eval_LS(aLS, x1 + tEps, z, gZ);
-                  double tdPhidz0 = eval_LS(aLS, x0, z + tEps, gZ);
-                  double tdPhidz1 = eval_LS(aLS, x1, z + tEps, gZ);
+                  double tdPhidx0 = eval_LS(aLS, x0 + tEps, z, gZ) - eval_LS(aLS, x0 - tEps, z, gZ);
+                  double tdPhidx1 = eval_LS(aLS, x1 + tEps, z, gZ) - eval_LS(aLS, x1 - tEps, z, gZ);
+                  double tdPhidz0 = eval_LS(aLS, x0, z + tEps, gZ) - eval_LS(aLS, x0, z - tEps, gZ);
+                  double tdPhidz1 = eval_LS(aLS, x1, z + tEps, gZ) - eval_LS(aLS, x1, z - tEps, gZ);
 
-                  double nx0 = (tdPhidx0 - y0) / tEps;
-                  double ny0 = 1.0;
-                  double nz0 = (tdPhidz0 - y0) / tEps;
+                  double nx0 = 0.5 * tdPhidx0 / tEps;
+                  double nz0 = 0.5 * tdPhidz0 / tEps;
+                  double len0 = std::sqrt(nx0 * nx0 + ny * ny + nz0 * nz0);
 
-                  double nx1 = (tdPhidx1 - y1) / tEps;
-                  double ny1 = 1.0;
-                  double nz1 = (tdPhidz1 - y1) / tEps;
+                  double nx1 = 0.5 * tdPhidx1 / tEps;
+                  double nz1 = 0.5 * tdPhidz1 / tEps;
+                  double len1 = std::sqrt(nx1 * nx1 + ny * ny + nz1 * nz1);
 
-                  glNormal3d(-nx0, ny0, -nz0);
+                  glNormal3d(nx0 / len0, ny / len0, nz0 / len0);
                   glVertex3d(x0, y0, z);
-                  glNormal3d(-nx1, ny1, -nz1);
+                  glNormal3d(nx1 / len1, ny / len1, nz1 / len1);
                   glVertex3d(x1, y1, z);
                }
                else if (gIsocontour)
@@ -745,40 +748,40 @@ namespace moris::GUI
                   double tXRoot = bisect(aLS, tXLow, tXHigh, z);
 
                   // compute normal at root (phi ~ 0)
-                  double tdPhidxR = eval_LS(aLS, tXRoot + tEps, z, gZ);
-                  double tdPhidzR = eval_LS(aLS, tXRoot, z + tEps, gZ);
-                  double nxr = (tdPhidxR - 0.0) / tEps;
-                  double nyr = 1.0;
-                  double nzr = (tdPhidzR - 0.0) / tEps;
+                  double tdPhidxR = eval_LS(aLS, tXRoot + tEps, z, gZ) - eval_LS(aLS, tXRoot - tEps, z, gZ);
+                  double tdPhidzR = eval_LS(aLS, tXRoot, z + tEps, gZ) - eval_LS(aLS, tXRoot, z - tEps, gZ);
+                  double nxr = 0.5 * tdPhidxR / tEps;
+                  double nzr = 0.5 * tdPhidzR / tEps;
+                  double lenr = std::sqrt(nxr * nxr + ny * ny + nzr * nzr);
 
                   if (tValid0)
                   {
                      // Plot vertex 0 and root
-                     double tdPhidx0 = eval_LS(aLS, x0 + tEps, z, gZ);
-                     double tdPhidz0 = eval_LS(aLS, x0, z + tEps, gZ);
-                     double nx0 = (tdPhidx0 - y0) / tEps;
-                     double ny0 = 1.0;
-                     double nz0 = (tdPhidz0 - y0) / tEps;
+                     double tdPhidx0 = eval_LS(aLS, x0 + tEps, z, gZ) - eval_LS(aLS, x0 - tEps, z, gZ);
+                     double tdPhidz0 = eval_LS(aLS, x0, z + tEps, gZ) - eval_LS(aLS, x0, z - tEps, gZ);
+                     double nx0 = 0.5 * tdPhidx0 / tEps;
+                     double nz0 = 0.5 * tdPhidz0 / tEps;
+                     double len0 = std::sqrt(nx0 * nx0 + ny * ny + nz0 * nz0);
 
-                     glNormal3d(-nx0, ny0, -nz0);
+                     glNormal3d(nx0 / len0, ny / len0, nz0 / len0);
                      glVertex3d(x0, y0, z);
 
-                     glNormal3d(-nxr, nyr, -nzr);
+                     glNormal3d(nxr / lenr, ny / lenr, nzr / lenr);
                      glVertex3d(tXRoot, 0.0, z);
                   }
                   else
                   {
                      // Plot root and vertex 1
-                     glNormal3d(nxr, nyr, nzr);
+                     glNormal3d(nxr / lenr, ny / lenr, nzr / lenr);
                      glVertex3d(tXRoot, 0.0, z);
 
-                     double tdPhidx1 = eval_LS(aLS, x1 + tEps, z, gZ);
-                     double tdPhidz1 = eval_LS(aLS, x1, z + tEps, gZ);
-                     double nx1 = (tdPhidx1 - y1) / tEps;
-                     double ny1 = 1.0;
-                     double nz1 = (tdPhidz1 - y1) / tEps;
+                     double tdPhidx1 = eval_LS(aLS, x1 + tEps, z, gZ) - eval_LS(aLS, x1 - tEps, z, gZ);
+                     double tdPhidz1 = eval_LS(aLS, x1, z + tEps, gZ) - eval_LS(aLS, x1, z - tEps, gZ);
+                     double nx1 = 0.5 * tdPhidx1 / tEps;
+                     double nz1 = 0.5 * tdPhidz1 / tEps;
+                     double len1 = std::sqrt(nx1 * nx1 + ny * ny + nz1 * nz1);
 
-                     glNormal3d(-nx1, ny1, -nz1);
+                     glNormal3d(nx1 / len1, ny / len1, nz1 / len1);
                      glVertex3d(x1, y1, z);
                   }
                }
@@ -884,13 +887,13 @@ namespace moris::GUI
                if (tValid0 && tValid1)
                {
                   // Emit vertices with their texture coordinates
-                  double xi0 = (x0 - gXLB) / (gXUB - gXLB) + gScroll * 0.01;
-                  double xi1 = (x1 - gXLB) / (gXUB - gXLB) + gScroll * 0.01;
+                  double xi0 = (x0 - gXLB) / (gXUB - gXLB) - gScroll * 0.01;
+                  double xi1 = (x1 - gXLB) / (gXUB - gXLB) - gScroll * 0.01;
                   double eta = (z - gZLB) / (gZUB - gZLB);
 
-                  glTexCoord2d(xi0, eta);
+                  glTexCoord2d(gXUB - xi0, eta);
                   glVertex3d(x0, 0.0, z);
-                  glTexCoord2d(xi1, eta);
+                  glTexCoord2d(gXUB - xi1, eta);
                   glVertex3d(x1, 0.0, z);
                }
                else if (gIsocontour)
@@ -930,25 +933,25 @@ namespace moris::GUI
                      if (tValid0)
                      {
                         // Emit vertices with their texture coordinates
-                        double xi0 = (x0 - gXLB) / (gXUB - gXLB) + gScroll * 0.01;
-                        double xiR = (tXRoot - gXLB) / (gXUB - gXLB) + gScroll * 0.01;
+                        double xi0 = (x0 - gXLB) / (gXUB - gXLB) - gScroll * 0.01;
+                        double xiR = (tXRoot - gXLB) / (gXUB - gXLB) - gScroll * 0.01;
                         double eta = (z - gZLB) / (gZUB - gZLB);
 
-                        glTexCoord2d(xi0, eta);
+                        glTexCoord2d(gXUB - xi0, eta);
                         glVertex3d(x0, 0.0, z);
-                        glTexCoord2d(xiR, eta);
+                        glTexCoord2d(gXUB - xiR, eta);
                         glVertex3d(tXRoot, 0.0, z);
                      }
                      else
                      {
                         // Emit vertices with their texture coordinates
-                        double xiR = (tXRoot - gXLB) / (gXUB - gXLB) + gScroll * 0.01;
-                        double xi1 = (x1 - gXLB) / (gXUB - gXLB) + gScroll * 0.01;
+                        double xiR = (tXRoot - gXLB) / (gXUB - gXLB) - gScroll * 0.01;
+                        double xi1 = (x1 - gXLB) / (gXUB - gXLB) - gScroll * 0.01;
                         double eta = (z - gZLB) / (gZUB - gZLB);
 
-                        glTexCoord2d(xiR, eta);
+                        glTexCoord2d(gXUB - xiR, eta);
                         glVertex3d(tXRoot, 0.0, z);
-                        glTexCoord2d(xi1, eta);
+                        glTexCoord2d(gXUB - xi1, eta);
                         glVertex3d(x1, 0.0, z);
                      }
                   }
@@ -1019,13 +1022,13 @@ namespace moris::GUI
 
       // Emit four vertices, each preceded by its texcoord (correct ordering)
       glBegin(GL_QUADS);
-      glTexCoord2d(0.0 + gScroll * 0.01, 0.0);
+      glTexCoord2d(0.75, 0.75);
       glVertex2i(aX, aY);
-      glTexCoord2d(1.0 + gScroll * 0.01, 0.0);
+      glTexCoord2d(1.0, 0.75);
       glVertex2i(aX + w, aY);
-      glTexCoord2d(1.0 + gScroll * 0.01, 1.0);
+      glTexCoord2d(1.0, 1.0);
       glVertex2i(aX + w, aY + h);
-      glTexCoord2d(0.0 + gScroll * 0.01, 1.0);
+      glTexCoord2d(0.75, 1.0);
       glVertex2i(aX, aY + h);
       glEnd();
 
@@ -1158,10 +1161,10 @@ namespace moris::GUI
    void load_demo()
    {
       // Load demo level-set functions
-      gLevelSets[0] = load_LS_from_string("sin(0.43*x)+cos(y)-cos(0.53*z)");
+      gLevelSets[2] = load_LS_from_string("sin(0.43*x)+cos(y)-cos(0.53*z)");
       // gLevelSets[1] = load_LS_from_string("sin(x)-1.2*cos(y)+1");
       gLevelSets[1] = load_LS_from_string("3*x+y-1");
-      gLevelSets[2] = load_LS_from_string("x^2+y^2-z-1");
+      gLevelSets[0] = load_LS_from_string("x^2+y^2-z-1");
       gNumGeoms = 3;
 
       // Set to plot all geometries
@@ -1222,17 +1225,17 @@ namespace moris::GUI
       glScaled(gScaleX, 1.0, gScaleZ);
 
       //  Flat or smooth shading
-      glShadeModel(tSmooth ? GL_SMOOTH : GL_FLAT);
+      glShadeModel(gSmooth ? GL_SMOOTH : GL_FLAT);
 
       //  Light switch
-      if (tLight)
+      if (gLight)
       {
          //  Translate intensity to color vectors
          float Ambient[] = {(float)0.01 * gAmbient, (float)0.01 * gAmbient, (float)0.01 * gAmbient, 1.0};
          float Diffuse[] = {(float)0.01 * gDiffuse, (float)0.01 * gDiffuse, (float)0.01 * gDiffuse, 1.0};
          float Specular[] = {(float)0.01 * gSpecular, (float)0.01 * gSpecular, (float)0.01 * gSpecular, 1.0};
          //  Light position
-         float Position[] = {tDistance * (float)Cos(tZeta), tYLight, tDistance * (float)Sin(tZeta), 1.0};
+         float Position[] = {gDistance * (float)Cos(gZeta), gYLight, gDistance * (float)Sin(gZeta), 1.0};
          //  Draw light position as ball (still no lighting here)
          glColor3f(1, 1, 1);
          ball(Position[0], Position[1], Position[2], 0.1);
@@ -1293,7 +1296,7 @@ namespace moris::GUI
       glColor3f(1.0, 1.0, 1.0);
       glWindowPos2i(5, 25);
       Print("Domain_x=[%f,%f] Domain_y=[%f,%f] z=%f Light=%s Lighting type=%s",
-            gXLB, gXUB, gZLB, gZUB, gZ, tLight ? "On" : "Off", tSmooth ? "Smooth" : "Flat");
+            gXLB, gXUB, gZLB, gZUB, gZ, gLight ? "On" : "Off", gSmooth ? "Smooth" : "Flat");
 
       //-----------------------------------------------------------
       // Viewport 2 (projection, top-down view)
@@ -1320,7 +1323,7 @@ namespace moris::GUI
          // Disable z-buffering for overlay
          glDisable(GL_DEPTH_TEST);
 
-         // Enable face culling since we're doing a top-down projection
+         // // Enable face culling since we're doing a top-down projection
          glFrontFace(GL_CCW);
          glEnable(GL_CULL_FACE);
 
@@ -1379,12 +1382,10 @@ namespace moris::GUI
 
          glPopMatrix();
 
-         // Re-enable all the good stuff
+         // Re-enable lighting, depth test; disable textures, face culling
          glEnable(GL_LIGHTING);
          glDisable(GL_TEXTURE_2D);
          glEnable(GL_DEPTH_TEST);
-
-         // Enable face culling for better performance
          glDisable(GL_CULL_FACE);
       }
 
@@ -1427,11 +1428,11 @@ namespace moris::GUI
       }
       else if (ch == 'l' || ch == 'L')
       {
-         tLight = 1 - tLight;
+         gLight = 1 - gLight;
       }
       else if (ch == 's' || ch == 'S')
       {
-         tSmooth = 1 - tSmooth;
+         gSmooth = 1 - gSmooth;
       }
       else if (ch == 'a' || ch == 'A')
       {
@@ -1701,6 +1702,38 @@ namespace moris::GUI
          set_active_phases_from_phase_index(12);
          gPhasesToPlot = {12};
       }
+      else if (key == GLUT_KEY_RIGHT)
+      {
+         gTheta -= 5.0;
+         if (gTheta > 360)
+            gTheta -= 360;
+
+         glutPostRedisplay();
+      }
+      else if (key == GLUT_KEY_LEFT)
+      {
+         gTheta += 5.0;
+         if (gTheta < 0)
+            gTheta += 360;
+
+         glutPostRedisplay();
+      }
+      else if (key == GLUT_KEY_UP)
+      {
+         gPhi -= 5.0;
+         if (gPhi > 89)
+            gPhi = 89;
+
+         glutPostRedisplay();
+      }
+      else if (key == GLUT_KEY_DOWN)
+      {
+         gPhi += 5.0;
+         if (gPhi < -89)
+            gPhi = -89;
+
+         glutPostRedisplay();
+      }
    }
 
    //-----------------------------------------------------------------------
@@ -1710,10 +1743,12 @@ namespace moris::GUI
    {
       if (gMoveLight)
       {
-         tZeta = (tZeta + 1) % 360;
-
-         glutPostRedisplay();
+         // Update light position
+         gZeta++;
+         if (gZeta > 360)
+            gZeta -= 360;
       }
+
       // Update texture scroll
       gScroll < MORIS_UINT_MAX - 1 ? gScroll++ : gScroll = 0;
 
