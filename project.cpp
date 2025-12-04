@@ -564,18 +564,26 @@ namespace moris::GUI
       {
          std::lock_guard<std::mutex> lock(gPhaseTableMutex);
          // check that the given phase index is appropriate for the number of geometries
-         if (aPhaseIdx < (uint)(1 << gNumGeoms) - 1)
+         if (tPhaseValue > 0 and tPhaseValue < (1 << gNumGeoms) - 1)
          {
+
             gPhaseTable[aPhaseIdx] = tPhaseValue;
 
             // Ensure the phase is in the list to plot
             if (std::find(gPhasesToPlot.begin(), gPhasesToPlot.end(), tPhaseValue) == gPhasesToPlot.end())
+            {
                gPhasesToPlot.push_back(tPhaseValue);
+            }
+
+            // Clear selection
+            gSelectedBitset = MORIS_UINT_MAX;
+         }
+         else
+         {
+            // Reject input - print message
+            std::cout << "Invalid phase value entered.\n";
          }
       }
-
-      // Clear selection and ask main loop to redisplay
-      gSelectedBitset = MORIS_UINT_MAX;
    }
 
    // Evaluate level-set function at given coordinates
@@ -965,6 +973,36 @@ namespace moris::GUI
       }
    }
 
+   void load_demo()
+   {
+      // Load demo level-set functions
+      gLevelSets[0] = load_LS_from_string("sin(0.43*x)+cos(y)-cos(0.53*z)");
+      // gLevelSets[1] = load_LS_from_string("sin(x)-1.2*cos(y)+1");
+      gLevelSets[1] = load_LS_from_string("3*x+y-1");
+      gLevelSets[2] = load_LS_from_string("x^2+y^2-z");
+      gNumGeoms = 3;
+
+      // Set to plot all geometries
+      for (uint iG = 0; iG < gNumGeoms; iG++)
+      {
+         gGeomsPhaseToPlot[iG] = PHASE::ALL;
+      }
+
+      // Set demo phase table
+      std::fill(gPhaseTable.begin(), gPhaseTable.end(), -1);
+      gPhaseTable[0] = 0;
+      gPhaseTable[1] = 2;
+      gPhaseTable[2] = 0;
+      gPhaseTable[3] = 0;
+      gPhaseTable[4] = 1;
+      gPhaseTable[5] = 0;
+      gPhaseTable[6] = 0;
+      gPhaseTable[7] = 0;
+
+      // Plot all phases
+      gPhasesToPlot = {0, 1, 2};
+   }
+
    void display()
    {
       // Clear the image
@@ -1042,7 +1080,6 @@ namespace moris::GUI
          drawLS(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG);
       }
 
-
       glDisable(GL_LIGHTING);   // No lighting for axes and text
       glDisable(GL_TEXTURE_2D); // No textures for axes and text
       glColor3f(1, 1, 1);       // white
@@ -1071,8 +1108,8 @@ namespace moris::GUI
       // Display settings
       glColor3f(1.0, 1.0, 1.0);
       glWindowPos2i(5, 25);
-      Print("Domain_x=[%f,%f] Domain_z=[%f,%f] Light=%s Lighting type=%s",
-            gXLB, gXUB, gZLB, gZUB, tLight ? "On" : "Off", tSmooth ? "Smooth" : "Flat");
+      Print("Domain_x=[%f,%f] Domain_y=[%f,%f] z=%f Light=%s Lighting type=%s",
+            gXLB, gXUB, gZLB, gZUB, gZ, tLight ? "On" : "Off", tSmooth ? "Smooth" : "Flat");
 
       //-----------------------------------------------------------
       // Viewport 2 (projection, top-down view)
@@ -1390,32 +1427,7 @@ namespace moris::GUI
       }
       else if (ch == '/' || ch == '?')
       {
-         // Load demo level-set functions
-         gLevelSets[0] = load_LS_from_string("sin(0.43*x)+cos(y)-1");
-         // gLevelSets[1] = load_LS_from_string("sin(x)-1.2*cos(y)+1");
-         gLevelSets[1] = load_LS_from_string("3*x+y-1");
-         gLevelSets[2] = load_LS_from_string("x^2+y^2-1");
-         gNumGeoms = 3;
-
-         // Set to plot all geometries
-         for (uint iG = 0; iG < gNumGeoms; iG++)
-         {
-            gGeomsPhaseToPlot[iG] = PHASE::ALL;
-         }
-
-         // Set demo phase table
-         std::fill(gPhaseTable.begin(), gPhaseTable.end(), -1);
-         gPhaseTable[0] = 0;
-         gPhaseTable[1] = 2;
-         gPhaseTable[2] = 0;
-         gPhaseTable[3] = 0;
-         gPhaseTable[4] = 1;
-         gPhaseTable[5] = 0;
-         gPhaseTable[6] = 0;
-         gPhaseTable[7] = 0;
-
-         // Plot all phases
-         gPhasesToPlot = {0, 1, 2};
+         load_demo();
       }
       else if (ch == 27) // Escape key
          exit(0);
@@ -1588,39 +1600,10 @@ namespace moris::GUI
 
          if (button == 3) // Scroll up - make the plotting domain smaller
          {
-            // float tLength = gXUB - gXLB;
-            // float tCenter = 0.5 * (gXUB + gXLB);
-            // tLength *= 0.98; // Zoom in by reducing length by 2%
-            // gXLB = tCenter - 0.5 * tLength;
-            // gXUB = tCenter + 0.5 * tLength;
-            // gScaleX = 2.0 / (gXUB - gXLB); // Update global scale
-
-            // tLength = gZUB - gZLB;
-            // tCenter = 0.5 * (gZUB + gZLB);
-            // tLength *= 0.98; // Zoom in by reducing length by 2%
-            // gZLB = tCenter - 0.5 * tLength;
-            // gZUB = tCenter + 0.5 * tLength;
-            // gScaleZ = 2.0 / (gZUB - gZLB); // Update global scale
-
-            // // Scale the projection y so that the aspect ratio is maintained
-            // gProjY = tLength;
             gZ += 0.05;
          }
          else if (button == 4) // Scroll down - zoom out
          {
-            // float tLength = gXUB - gXLB;
-            // float tCenter = 0.5 * (gXUB + gXLB);
-            // tLength *= 1.02; // Zoom out by increasing length by 2%
-            // gXLB = tCenter - 0.5 * tLength;
-            // gXUB = tCenter + 0.5 * tLength;
-            // gScaleX = 2.0 / (gXUB - gXLB); // Update global scale
-
-            // tLength = gZUB - gZLB;
-            // tCenter = 0.5 * (gZUB + gZLB);
-            // tLength *= 1.02; // Zoom out by increasing length by 2%
-            // gZLB = tCenter - 0.5 * tLength;
-            // gZUB = tCenter + 0.5 * tLength;
-            // gScaleZ = 2.0 / (gZUB - gZLB); // Update global scale
             gZ -= 0.05;
          }
 
@@ -1707,6 +1690,9 @@ int main(int argc, char *argv[])
    // Compute the spatial grid
    moris::GUI::linspace(moris::GUI::gXVals, moris::GUI::gXLB, moris::GUI::gXUB);
    moris::GUI::linspace(moris::GUI::gZVals, moris::GUI::gZLB, moris::GUI::gZUB);
+
+   // Load demo level-set functions and phase table
+   moris::GUI::load_demo();
 
    //  Initialize GLUT
    glutInit(&argc, argv);
