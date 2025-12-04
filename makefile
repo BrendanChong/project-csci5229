@@ -6,7 +6,7 @@ all: $(EXE)
 
 #  Msys/MinGW
 ifeq "$(OS)" "Windows_NT"
-CFLG=-O3 -Wall -DUSEGLEW -Wa,-mbig-obj
+CFLG=-O3 -Wall -DUSEGLEW # -Wa,-mbig-obj
 LIBS=-lfreeglut -lglew32 -lglu32 -lopengl32 -lm
 CLEAN=rm -f *.exe *.o *.a
 else
