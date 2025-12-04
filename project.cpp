@@ -35,7 +35,7 @@
 
 using LS = exprtk::expression<double>; // Level set function type - returns phi(x,y,z)
 using Bitset = std::vector<int>;       // Bitset type for phase representation
-typedef uint uint;
+typedef unsigned int uint;
 
 namespace moris::GUI
 {
@@ -487,7 +487,7 @@ namespace moris::GUI
       std::thread([aGeometryIndex]()
                   {
         std::string tInput;
-        std::cout << (gSpatialDim == 2 ? "Enter a level-set function of (x,y):" : "Enter a level-set function of (x,y,z):");
+        std::cout << ("Enter a level-set function of (x,y,z):");
         if (!std::getline(std::cin, tInput))
         {
            std::cerr << "Input aborted or EOF encountered.\n";
@@ -497,7 +497,7 @@ namespace moris::GUI
         tInput = trim(tInput);
         if (tInput.empty())
         {
-           std::cerr << "Empty input – ignoring.\n";
+           std::cerr << "Empty input - ignoring.\n";
            return;
         }
 
@@ -590,14 +590,7 @@ namespace moris::GUI
       return aLS.value();
    }
 
-   void drawLS3D(const LS &aLS, PHASE aSign, int aColorIndex)
-   {
-      // TODO
-
-      Fatal("drawLS3D not implemented yet");
-   }
-
-   void drawLS2D(const LS &aLS, PHASE aSign, int aColorIndex)
+   void drawLS(const LS &aLS, PHASE aSign, int aColorIndex)
    {
       // Check if we need to plot this geometry
       if (aSign == PHASE::NONE)
@@ -620,7 +613,7 @@ namespace moris::GUI
          for (int j = 0; j < tNumPoints; j++)
          {
             double z = gZVals[j * tReductionFactor];
-            tPhiVals[i][j] = eval_LS(aLS, x, z);
+            tPhiVals[i][j] = eval_LS(aLS, x, z, gZ);
          }
       }
 
@@ -654,10 +647,10 @@ namespace moris::GUI
                // Finite difference normals (forward FD for efficiency)
                // TODO: Compute normals using the cached LS values instead of re-evaluating
                double tEps = 1e-8; // FD step size
-               double tdPhidx0 = eval_LS(aLS, x0 + tEps, z);
-               double tdPhidx1 = eval_LS(aLS, x1 + tEps, z);
-               double tdPhidz0 = eval_LS(aLS, x0, z + tEps);
-               double tdPhidz1 = eval_LS(aLS, x1, z + tEps);
+               double tdPhidx0 = eval_LS(aLS, x0 + tEps, z, gZ);
+               double tdPhidx1 = eval_LS(aLS, x1 + tEps, z, gZ);
+               double tdPhidz0 = eval_LS(aLS, x0, z + tEps, gZ);
+               double tdPhidz1 = eval_LS(aLS, x1, z + tEps, gZ);
 
                double nx0 = (tdPhidx0 - y0) / tEps;
                double ny0 = 1.0;
@@ -696,11 +689,11 @@ namespace moris::GUI
    /**
     * Draws only regions that satisfy the bitset for the all the geometries
     */
-   void draw_LS_projection_2D(std::vector<LS> &aLevelSets, std::vector<int> &aBitset, int aColorIndex, uint aTexture = MORIS_UINT_MAX)
+   void draw_LS_projection(std::vector<LS> &aLevelSets, std::vector<int> &aBitset, int aColorIndex, uint aTexture = MORIS_UINT_MAX)
    {
       if (aBitset.size() != gNumGeoms)
       {
-         Fatal("draw_LS_projection_2D: Bitset size does not match number of level-sets");
+         Fatal("draw_LS_projection: Bitset size does not match number of level-sets");
       }
 
       // Check if this phase has a projection texture
@@ -726,8 +719,8 @@ namespace moris::GUI
             for (int iY = 0; iY < NUM_POINTS; iY++)
             {
                double z = gZVals[iY];
-               y0_vals[iG][iX][iY] = eval_LS(aLevelSets[iG], x, z);
-               y1_vals[iG][iX][iY] = eval_LS(aLevelSets[iG], x, z);
+               y0_vals[iG][iX][iY] = eval_LS(aLevelSets[iG], x, z, gZ);
+               y1_vals[iG][iX][iY] = eval_LS(aLevelSets[iG], x, z, gZ);
             }
          }
       }
@@ -800,7 +793,7 @@ namespace moris::GUI
          glDisable(GL_TEXTURE_2D);
       }
 
-      ErrCheck("draw_LS_projection_2D");
+      ErrCheck("draw_LS_projection");
 
       glPopMatrix();
    }
@@ -968,7 +961,7 @@ namespace moris::GUI
          glWindowPos2i(tValueX, y);
          Print("%s", tPhaseIndex.c_str());
 
-         print_phase_color(tValueX + 20, y, i, gPhaseTable[i] % gColors.size(), 10, 10);
+         print_phase_color(tValueX + 25, y, i, gPhaseTable[i] % gColors.size(), 10, 10);
       }
    }
 
@@ -1043,29 +1036,12 @@ namespace moris::GUI
       else
          glDisable(GL_LIGHTING);
 
-      switch (gSpatialDim)
+      // Plot each level-set geometry
+      for (uint iG = 0; iG < gNumGeoms; iG++)
       {
-      case 2:
-      {
-         for (uint iG = 0; iG < gNumGeoms; iG++)
-         {
-            drawLS2D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG);
-         }
-         break;
+         drawLS(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG);
       }
-      case 3:
-      {
-         for (uint iG = 0; iG < gNumGeoms; iG++)
-         {
-            drawLS3D(gLevelSets[iG], gGeomsPhaseToPlot[iG], iG);
-         }
-         break;
-      }
-      default:
-      {
-         Fatal("Unsupported spatial dimension %d", gSpatialDim);
-      }
-      }
+
 
       glDisable(GL_LIGHTING);   // No lighting for axes and text
       glDisable(GL_TEXTURE_2D); // No textures for axes and text
@@ -1153,27 +1129,7 @@ namespace moris::GUI
             Bitset tBinary = int_to_bitset(iBitset, gNumGeoms);
 
             // Plot each geometry according to the bitset, using the color for this phase
-            switch (gSpatialDim)
-            {
-            case 2:
-            {
-               draw_LS_projection_2D(gLevelSets, tBinary, gPhaseTable[iBitset] % gColors.size(), iBitset == gSelectedBitset ? gTexture[0] : MORIS_UINT_MAX);
-               break;
-            }
-            case 3:
-            {
-               // for (uint iG = 0; iG < gNumGeoms; iG++)
-               // {
-               //    drawLS3D(gLevelSets[iG], tBinary[iG] == 1 ? PHASE::POSITIVE : PHASE::NEGATIVE, gPhaseTable[iBitset] % gColors.size());
-               // }
-               Fatal("3D not implemented yet");
-               break;
-            }
-            default:
-            {
-               Fatal("Unsupported spatial dimension %d", gSpatialDim);
-            }
-            }
+            draw_LS_projection(gLevelSets, tBinary, gPhaseTable[iBitset] % gColors.size(), iBitset == gSelectedBitset ? gTexture[0] : MORIS_UINT_MAX);
          }
 
          // Print labels for the viewports
@@ -1569,27 +1525,27 @@ namespace moris::GUI
          int deltaX = x - gMouseX;
          int deltaY = y - gMouseY;
 
-         if (gProjectionMain)
-         {
-            // Pan the view based on mouse movement
-            double tPanSpeedX = 0.01 / gScaleX; // Adjust pan speed based on zoom level
-            double tPanSpeedZ = 0.01 / gScaleZ; // Adjust pan speed based on zoom level
+         // if (gProjectionMain)
+         // {
+         //    // Pan the view based on mouse movement
+         //    double tPanSpeedX = 0.01 / gScaleX; // Adjust pan speed based on zoom level
+         //    double tPanSpeedZ = 0.01 / gScaleZ; // Adjust pan speed based on zoom level
 
-            double tCenterX = 0.5 * (gXLB + gXUB);
-            double tCenterZ = 0.5 * (gZLB + gZUB);
+         //    double tCenterX = 0.5 * (gXLB + gXUB);
+         //    double tCenterZ = 0.5 * (gZLB + gZUB);
 
-            tCenterX -= deltaX * tPanSpeedX;
-            tCenterZ += deltaY * tPanSpeedZ;
+         //    tCenterX -= deltaX * tPanSpeedX;
+         //    tCenterZ += deltaY * tPanSpeedZ;
 
-            gXLB = tCenterX - 0.5 * (gXUB - gXLB);
-            gXUB = tCenterX + 0.5 * (gXUB - gXLB);
-            gZLB = tCenterZ - 0.5 * (gZUB - gZLB);
-            gZUB = tCenterZ + 0.5 * (gZUB - gZLB);
+         //    gXLB = tCenterX - 0.5 * (gXUB - gXLB);
+         //    gXUB = tCenterX + 0.5 * (gXUB - gXLB);
+         //    gZLB = tCenterZ - 0.5 * (gZUB - gZLB);
+         //    gZUB = tCenterZ + 0.5 * (gZUB - gZLB);
 
-            linspace(gXVals, gXLB, gXUB);
-            linspace(gZVals, gZLB, gZUB);
-         }
-         else
+         //    linspace(gXVals, gXLB, gXUB);
+         //    linspace(gZVals, gZLB, gZUB);
+         // }
+         // else
          {
             // Update angles based on mouse movement
             gTheta += deltaX * 0.1; // Horizontal movement controls azimuth (yaw)
@@ -1632,38 +1588,40 @@ namespace moris::GUI
 
          if (button == 3) // Scroll up - make the plotting domain smaller
          {
-            float tLength = gXUB - gXLB;
-            float tCenter = 0.5 * (gXUB + gXLB);
-            tLength *= 0.98; // Zoom in by reducing length by 2%
-            gXLB = tCenter - 0.5 * tLength;
-            gXUB = tCenter + 0.5 * tLength;
-            gScaleX = 2.0 / (gXUB - gXLB); // Update global scale
-            gScaleZ = 2.0 / (gZUB - gZLB); // Update global scale
+            // float tLength = gXUB - gXLB;
+            // float tCenter = 0.5 * (gXUB + gXLB);
+            // tLength *= 0.98; // Zoom in by reducing length by 2%
+            // gXLB = tCenter - 0.5 * tLength;
+            // gXUB = tCenter + 0.5 * tLength;
+            // gScaleX = 2.0 / (gXUB - gXLB); // Update global scale
 
-            tLength = gZUB - gZLB;
-            tCenter = 0.5 * (gZUB + gZLB);
-            tLength *= 0.98; // Zoom in by reducing length by 2%
-            gZLB = tCenter - 0.5 * tLength;
-            gZUB = tCenter + 0.5 * tLength;
+            // tLength = gZUB - gZLB;
+            // tCenter = 0.5 * (gZUB + gZLB);
+            // tLength *= 0.98; // Zoom in by reducing length by 2%
+            // gZLB = tCenter - 0.5 * tLength;
+            // gZUB = tCenter + 0.5 * tLength;
+            // gScaleZ = 2.0 / (gZUB - gZLB); // Update global scale
 
-            // Scale the projection y so that the aspect ratio is maintained
-            gProjY = tLength;
+            // // Scale the projection y so that the aspect ratio is maintained
+            // gProjY = tLength;
+            gZ += 0.05;
          }
          else if (button == 4) // Scroll down - zoom out
          {
-            float tLength = gXUB - gXLB;
-            float tCenter = 0.5 * (gXUB + gXLB);
-            tLength *= 1.02; // Zoom out by increasing length by 2%
-            gXLB = tCenter - 0.5 * tLength;
-            gXUB = tCenter + 0.5 * tLength;
-            gScaleX = 2.0 / (gXUB - gXLB); // Update global scale
-            gScaleZ = 2.0 / (gZUB - gZLB); // Update global scale
+            // float tLength = gXUB - gXLB;
+            // float tCenter = 0.5 * (gXUB + gXLB);
+            // tLength *= 1.02; // Zoom out by increasing length by 2%
+            // gXLB = tCenter - 0.5 * tLength;
+            // gXUB = tCenter + 0.5 * tLength;
+            // gScaleX = 2.0 / (gXUB - gXLB); // Update global scale
 
-            tLength = gZUB - gZLB;
-            tCenter = 0.5 * (gZUB + gZLB);
-            tLength *= 1.02; // Zoom out by increasing length by 2%
-            gZLB = tCenter - 0.5 * tLength;
-            gZUB = tCenter + 0.5 * tLength;
+            // tLength = gZUB - gZLB;
+            // tCenter = 0.5 * (gZUB + gZLB);
+            // tLength *= 1.02; // Zoom out by increasing length by 2%
+            // gZLB = tCenter - 0.5 * tLength;
+            // gZUB = tCenter + 0.5 * tLength;
+            // gScaleZ = 2.0 / (gZUB - gZLB); // Update global scale
+            gZ -= 0.05;
          }
 
          // Update the projection
@@ -1712,7 +1670,7 @@ namespace moris::GUI
             Bitset tBitset(gNumGeoms);
             for (uint iG = 0; iG < gNumGeoms; iG++)
             {
-               double phi = eval_LS(gLevelSets[iG], wx, wz);
+               double phi = eval_LS(gLevelSets[iG], wx, wz, gZ);
                tBitset[iG] = (phi >= 0) ? 1 : 0;
             }
 
@@ -1773,7 +1731,7 @@ int main(int argc, char *argv[])
    glEnable(GL_DEPTH_TEST);
 
    // Load textures
-   moris::GUI::gTexture[0] = LoadTexBMP("water.bmp");
+   moris::GUI::gTexture[0] = LoadTexBMP("selected_grey.bmp");
 
    ErrCheck("init");
 
