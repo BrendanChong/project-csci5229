@@ -29,7 +29,7 @@
 #define RES 1
 #endif
 
-#define NUM_POINTS 100             // number of points in each direction for the grid
+#define NUM_POINTS 300             // number of points in each direction for the grid
 #define MAX_GEOMETRIES 5           // Maximum number of geometries
 #define MORIS_UINT_MAX 4294967295u // Maximum value for an uint, remove this for final moris build
 
@@ -116,6 +116,8 @@ namespace moris::GUI
 
    std::mutex gLevelSetMutex; // Mutex to protect level-set updates from background input threads
 
+   bool gIsocontour = true;                                                                      // Flag to plot isocontour points
+
    //-----------------------------------------------------------
    // Global phase variables
    //-----------------------------------------------------------
@@ -177,6 +179,45 @@ namespace moris::GUI
       }
    }
 
+   //-----------------------------------------------------------------------
+
+   // Evaluate level-set function at given coordinates
+   double eval_LS(const LS &aLS, double aX, double aY, double aZ = 0.0f)
+   {
+      // Set global coordinates
+      gX = aX;
+      gY = aY;
+      gZ = aZ;
+
+      // Evaluate expression
+      return aLS.value();
+   }
+
+   //-----------------------------------------------------------------------
+
+   /**
+    * Bisection method to find root of level-set function along one dimension
+    */
+   double bisect(const LS &aLS, double a, double b, double y, double tol = 1e-4)
+   {
+      double tMidPoint = 0.5 * (a + b);
+
+      if (std::abs(b - a) < tol)
+      {
+         return tMidPoint;
+      }
+      else if (eval_LS(aLS, a, y, gZ) * eval_LS(aLS, tMidPoint, y, gZ) < 0)
+      {
+         return bisect(aLS, a, tMidPoint, y, tol);
+      }
+      else
+      {
+         return bisect(aLS, tMidPoint, b, y, tol);
+      }
+   }
+
+   //-----------------------------------------------------------------------
+
    /*
     *  Convert an integer to binary representation to determine which phase to draw
     */
@@ -195,6 +236,8 @@ namespace moris::GUI
       return tBinary;
    }
 
+   //-----------------------------------------------------------------------
+
    /**
     * Convert a bitset to its integer representation
     */
@@ -209,6 +252,8 @@ namespace moris::GUI
       }
       return tValue;
    }
+
+   //-----------------------------------------------------------------------
 
    /*
     * Gets the indices of the phase table that correspond to a given phase
@@ -226,6 +271,8 @@ namespace moris::GUI
       return indices;
    }
 
+   //-----------------------------------------------------------------------
+
    /**
     * Resets all active geometry phases to NONE
     */
@@ -236,6 +283,8 @@ namespace moris::GUI
          gGeomsPhaseToPlot[iG] = PHASE::NONE;
       }
    }
+
+   //-----------------------------------------------------------------------
 
    /**
     * Adds geometry phases to plot from binary representation
@@ -273,6 +322,8 @@ namespace moris::GUI
       }
    }
 
+   //-----------------------------------------------------------------------
+
    /**
     * Gets all the bitsets from the phase table that are assigned to a given phase index,
     * then sets the active geometry phases to plot accordingly
@@ -294,6 +345,8 @@ namespace moris::GUI
       }
    }
 
+   //-----------------------------------------------------------------------
+
    /**
     * Function to see the negative region for all currently active geometries
     */
@@ -307,6 +360,8 @@ namespace moris::GUI
          }
       }
    }
+
+   //-----------------------------------------------------------------------
 
    /**
     * Function to see the positive region for all currently active geometries
@@ -322,6 +377,8 @@ namespace moris::GUI
       }
    }
 
+   //-----------------------------------------------------------------------
+
    /*
     *  Draw vertex in polar coordinates with normal
     */
@@ -335,6 +392,8 @@ namespace moris::GUI
       glNormal3d(x, y, z);
       glVertex3d(x, y, z);
    }
+
+   //-----------------------------------------------------------------------
 
    /*
     *  Draw a ball
@@ -370,6 +429,8 @@ namespace moris::GUI
       glPopMatrix();
    }
 
+   //-----------------------------------------------------------------------
+
    // Helper to trim whitespace from start and end of a string
    std::string trim(const std::string &s)
    {
@@ -379,6 +440,8 @@ namespace moris::GUI
       size_t end = s.find_last_not_of(" \t\n\r");
       return s.substr(start, end - start + 1);
    }
+
+   //-----------------------------------------------------------------------
 
    /**
     * Gets an entire phase table from user input
@@ -449,6 +512,8 @@ namespace moris::GUI
       }
    }
 
+   //-----------------------------------------------------------------------
+
    /**
     * Uses exprtk to parse a level-set function from a string.
     * @param aInput String containing the level-set function expression (must be of x,y,z)
@@ -475,6 +540,8 @@ namespace moris::GUI
 
       return tExpression;
    }
+
+   //-----------------------------------------------------------------------
 
    /**
     * Gets level-set function input from the user without blocking the main thread.
@@ -523,6 +590,8 @@ namespace moris::GUI
         } })
           .detach();
    }
+
+   //-----------------------------------------------------------------------
 
    /**
     * Prompts the user to enter a phase index for a given bitset and updates the phase table accordingly.
@@ -586,17 +655,7 @@ namespace moris::GUI
       }
    }
 
-   // Evaluate level-set function at given coordinates
-   double eval_LS(const LS &aLS, double aX, double aY, double aZ = 0.0f)
-   {
-      // Set global coordinates
-      gX = aX;
-      gY = aY;
-      gZ = aZ;
-
-      // Evaluate expression
-      return aLS.value();
-   }
+   //-----------------------------------------------------------------------
 
    void drawLS(const LS &aLS, PHASE aSign, int aColorIndex)
    {
@@ -609,7 +668,7 @@ namespace moris::GUI
       glPushMatrix();
 
       // Reduce number of points for faster rendering
-      int tReductionFactor = 5;
+      int tReductionFactor = 3;
       int tNumPoints = NUM_POINTS / tReductionFactor;
 
       std::vector<std::vector<double>> tPhiVals(tNumPoints, std::vector<double>(tNumPoints));
@@ -640,8 +699,10 @@ namespace moris::GUI
             bool tValid0 = !((aSign == PHASE::POSITIVE && y0 < 0) || (aSign == PHASE::NEGATIVE && y0 > 0));
             bool tValid1 = !((aSign == PHASE::POSITIVE && y1 < 0) || (aSign == PHASE::NEGATIVE && y1 > 0));
 
-            // If both vertices are valid, emit them into the strip. Otherwise close the current strip.
-            if (tValid0 && tValid1)
+            // If both vertices are valid, emit them into the strip.
+            // If exactly one is valid, compute the zero-level crossing along the edge
+            // and emit that intersection in place of the invalid vertex.
+            if (tValid0 || tValid1)
             {
                if (!stripOpen)
                {
@@ -649,32 +710,82 @@ namespace moris::GUI
                   stripOpen = true;
                }
 
-               // Set color (with alpha) for this geometry
+               // Set color for this geometry
                glColor3d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2]);
 
-               // Finite difference normals (forward FD for efficiency)
-               // TODO: Compute normals using the cached LS values instead of re-evaluating
-               double tEps = 1e-8; // FD step size
-               double tdPhidx0 = eval_LS(aLS, x0 + tEps, z, gZ);
-               double tdPhidx1 = eval_LS(aLS, x1 + tEps, z, gZ);
-               double tdPhidz0 = eval_LS(aLS, x0, z + tEps, gZ);
-               double tdPhidz1 = eval_LS(aLS, x1, z + tEps, gZ);
+               // finite difference epsilon for normals
+               double tEps = 1e-6;
 
-               double nx0 = (tdPhidx0 - y0) / tEps;
-               double ny0 = 1.0;
-               double nz0 = (tdPhidz0 - y0) / tEps;
+               if (tValid0 && tValid1)
+               {
+                  // both vertices are in the desired plotting domain
+                  double tdPhidx0 = eval_LS(aLS, x0 + tEps, z, gZ);
+                  double tdPhidx1 = eval_LS(aLS, x1 + tEps, z, gZ);
+                  double tdPhidz0 = eval_LS(aLS, x0, z + tEps, gZ);
+                  double tdPhidz1 = eval_LS(aLS, x1, z + tEps, gZ);
 
-               double nx1 = (tdPhidx1 - y1) / tEps;
-               double ny1 = 1.0;
-               double nz1 = (tdPhidz1 - y1) / tEps;
-               // Emit vertices with normals
-               glNormal3d(nx0, ny0, nz0);
-               glVertex3d(x0, y0, z);
-               glNormal3d(nx1, ny1, nz1);
-               glVertex3d(x1, y1, z);
+                  double nx0 = (tdPhidx0 - y0) / tEps;
+                  double ny0 = 1.0;
+                  double nz0 = (tdPhidz0 - y0) / tEps;
+
+                  double nx1 = (tdPhidx1 - y1) / tEps;
+                  double ny1 = 1.0;
+                  double nz1 = (tdPhidz1 - y1) / tEps;
+
+                  glNormal3d(-nx0, ny0, -nz0);
+                  glVertex3d(x0, y0, z);
+                  glNormal3d(-nx1, ny1, -nz1);
+                  glVertex3d(x1, y1, z);
+               }
+               else if (gIsocontour)
+               {
+                  // Sign change, compute intersection root along x0-x1 edge
+                  double tXLow = y0 < 0 ? x0 : x1;
+                  double tXHigh = y0 < 0 ? x1 : x0;
+                  double tXRoot = bisect(aLS, tXLow, tXHigh, z);
+
+                  // compute normal at root (phi ~ 0)
+                  double tdPhidxR = eval_LS(aLS, tXRoot + tEps, z, gZ);
+                  double tdPhidzR = eval_LS(aLS, tXRoot, z + tEps, gZ);
+                  double nxr = (tdPhidxR - 0.0) / tEps;
+                  double nyr = 1.0;
+                  double nzr = (tdPhidzR - 0.0) / tEps;
+
+                  if (tValid0)
+                  {
+                     // Plot vertex 0 and root
+                     double tdPhidx0 = eval_LS(aLS, x0 + tEps, z, gZ);
+                     double tdPhidz0 = eval_LS(aLS, x0, z + tEps, gZ);
+                     double nx0 = (tdPhidx0 - y0) / tEps;
+                     double ny0 = 1.0;
+                     double nz0 = (tdPhidz0 - y0) / tEps;
+
+                     glNormal3d(-nx0, ny0, -nz0);
+                     glVertex3d(x0, y0, z);
+
+                     glNormal3d(-nxr, nyr, -nzr);
+                     glVertex3d(tXRoot, 0.0, z);
+                  }
+                  else
+                  {
+                     // Plot root and vertex 1
+                     glNormal3d(nxr, nyr, nzr);
+                     glVertex3d(tXRoot, 0.0, z);
+
+                     double tdPhidx1 = eval_LS(aLS, x1 + tEps, z, gZ);
+                     double tdPhidz1 = eval_LS(aLS, x1, z + tEps, gZ);
+                     double nx1 = (tdPhidx1 - y1) / tEps;
+                     double ny1 = 1.0;
+                     double nz1 = (tdPhidz1 - y1) / tEps;
+
+                     glNormal3d(-nx1, ny1, -nz1);
+                     glVertex3d(x1, y1, z);
+                  }
+               }
             }
             else
             {
+               // both invalid: close strip if open
                if (stripOpen)
                {
                   glEnd();
@@ -693,6 +804,8 @@ namespace moris::GUI
 
       ErrCheck("drawLS");
    }
+
+   //-----------------------------------------------------------------------
 
    /**
     * Draws only regions that satisfy the bitset for the all the geometries
@@ -715,8 +828,7 @@ namespace moris::GUI
       glPushMatrix();
 
       // Need to evaluate all level-sets at each vertex
-      std::vector<std::vector<std::vector<double>>> y0_vals(aLevelSets.size(), std::vector<std::vector<double>>(NUM_POINTS, std::vector<double>(NUM_POINTS)));
-      std::vector<std::vector<std::vector<double>>> y1_vals(aLevelSets.size(), std::vector<std::vector<double>>(NUM_POINTS, std::vector<double>(NUM_POINTS)));
+      std::vector<std::vector<std::vector<double>>> tPhiVals(aLevelSets.size(), std::vector<std::vector<double>>(NUM_POINTS, std::vector<double>(NUM_POINTS)));
 
       // Evaluate all level-sets at each vertex
       for (size_t iG = 0; iG < aLevelSets.size(); iG++)
@@ -727,8 +839,7 @@ namespace moris::GUI
             for (int iY = 0; iY < NUM_POINTS; iY++)
             {
                double z = gZVals[iY];
-               y0_vals[iG][iX][iY] = eval_LS(aLevelSets[iG], x, z, gZ);
-               y1_vals[iG][iX][iY] = eval_LS(aLevelSets[iG], x, z, gZ);
+               tPhiVals[iG][iX][iY] = eval_LS(aLevelSets[iG], x, z, gZ);
             }
          }
       }
@@ -737,27 +848,29 @@ namespace moris::GUI
       for (int i = 0; i < NUM_POINTS - 1; i++)
       {
          bool stripOpen = false;
+         double x0 = gXVals[i];
+         double x1 = gXVals[i + 1];
+
          for (int j = 0; j < NUM_POINTS; j++)
          {
+            // Per-vertex evaluation (do not mutate x0/x1)
+            double z = gZVals[j];
+
+            // Determine validity of each vertex by checking all geometries against the bitset
             bool tValid0 = true;
             bool tValid1 = true;
-            for (size_t iG = 0; iG < aLevelSets.size(); iG++)
+            for (size_t iG = 0; iG < aLevelSets.size(); ++iG)
             {
-               // Check validity for vertex 0
-               if ((aBitset[iG] == 1 && y0_vals[iG][i][j] < 0) ||
-                   (aBitset[iG] == 0 && y0_vals[iG][i][j] > 0))
-               {
+               double phi0 = tPhiVals[iG][i][j];
+               double phi1 = tPhiVals[iG][i + 1][j];
+               int want = aBitset[iG]; // 1 -> positive, 0 -> negative
+               if ((want == 1 && phi0 < 0) || (want == 0 && phi0 > 0))
                   tValid0 = false;
-               }
-               // Check validity for vertex 1
-               if ((aBitset[iG] == 1 && y1_vals[iG][i + 1][j] < 0) ||
-                   (aBitset[iG] == 0 && y1_vals[iG][i + 1][j] > 0))
-               {
+               if ((want == 1 && phi1 < 0) || (want == 0 && phi1 > 0))
                   tValid1 = false;
-               }
             }
-            // If both vertices are valid, emit them into the strip. Can pick any geometry as we will only see the top down projection
-            if (tValid0 && tValid1)
+
+            if (tValid0 || tValid1)
             {
                if (!stripOpen)
                {
@@ -765,18 +878,81 @@ namespace moris::GUI
                   stripOpen = true;
                }
 
-               // Set color for this geometry
                glColor3d(gColors[aColorIndex][0], gColors[aColorIndex][1], gColors[aColorIndex][2]);
 
-               // Emit vertices with their texture coordinates
-               double xi0 = (gXVals[i] - gXLB) / (gXUB - gXLB) + gScroll * 0.01;
-               double xi1 = (gXVals[i + 1] - gXLB) / (gXUB - gXLB) + gScroll * 0.01;
-               double eta = (gZVals[j] - gZLB) / (gZUB - gZLB);
+               // If both vertices valid, emit flat projection vertices (y=0)
+               if (tValid0 && tValid1)
+               {
+                  // Emit vertices with their texture coordinates
+                  double xi0 = (x0 - gXLB) / (gXUB - gXLB) + gScroll * 0.01;
+                  double xi1 = (x1 - gXLB) / (gXUB - gXLB) + gScroll * 0.01;
+                  double eta = (z - gZLB) / (gZUB - gZLB);
 
-               glTexCoord2d(xi0, eta);
-               glVertex3d(gXVals[i], y0_vals[0][i][j], gZVals[j]);
-               glTexCoord2d(xi1, eta);
-               glVertex3d(gXVals[i + 1], y1_vals[0][i + 1][j], gZVals[j]);
+                  glTexCoord2d(xi0, eta);
+                  glVertex3d(x0, 0.0, z);
+                  glTexCoord2d(xi1, eta);
+                  glVertex3d(x1, 0.0, z);
+               }
+               else if (gIsocontour)
+               {
+                  // Find the geometry that changes sign between the two vertices.
+                  // Use that geometry to compute the intersection root.
+                  int flipGeom = -1;
+                  for (size_t iG = 0; iG < aLevelSets.size(); ++iG)
+                  {
+                     double phi0 = tPhiVals[iG][i][j];
+                     double phi1 = tPhiVals[iG][i + 1][j];
+                     if ((phi0 >= 0) != (phi1 >= 0))
+                     {
+                        flipGeom = static_cast<int>(iG);
+                        break;
+                     }
+                  }
+
+                  if (flipGeom == -1)
+                  {
+                     // Shouldn't happen: fallback to closing the strip
+                     if (stripOpen)
+                     {
+                        glEnd();
+                        stripOpen = false;
+                     }
+                  }
+                  else
+                  {
+                     // Compute root along edge for the geometry that flips
+                     double phi0_flip = tPhiVals[flipGeom][i][j];
+                     double tXLow = (phi0_flip < 0) ? x0 : x1;
+                     double tXHigh = (phi0_flip < 0) ? x1 : x0;
+                     double tXRoot = bisect(aLevelSets[flipGeom], tXLow, tXHigh, z);
+
+                     // Emit vertices in strip order: valid vertex then root (or root then valid)
+                     if (tValid0)
+                     {
+                        // Emit vertices with their texture coordinates
+                        double xi0 = (x0 - gXLB) / (gXUB - gXLB) + gScroll * 0.01;
+                        double xiR = (tXRoot - gXLB) / (gXUB - gXLB) + gScroll * 0.01;
+                        double eta = (z - gZLB) / (gZUB - gZLB);
+
+                        glTexCoord2d(xi0, eta);
+                        glVertex3d(x0, 0.0, z);
+                        glTexCoord2d(xiR, eta);
+                        glVertex3d(tXRoot, 0.0, z);
+                     }
+                     else
+                     {
+                        // Emit vertices with their texture coordinates
+                        double xiR = (tXRoot - gXLB) / (gXUB - gXLB) + gScroll * 0.01;
+                        double xi1 = (x1 - gXLB) / (gXUB - gXLB) + gScroll * 0.01;
+                        double eta = (z - gZLB) / (gZUB - gZLB);
+
+                        glTexCoord2d(xiR, eta);
+                        glVertex3d(tXRoot, 0.0, z);
+                        glTexCoord2d(xi1, eta);
+                        glVertex3d(x1, 0.0, z);
+                     }
+                  }
+               }
             }
             else
             {
@@ -805,6 +981,8 @@ namespace moris::GUI
 
       glPopMatrix();
    }
+
+   //-----------------------------------------------------------------------
 
    /**
     * Prints a colored rectangle at the given screen coordinates
@@ -867,6 +1045,8 @@ namespace moris::GUI
 
       ErrCheck("print_phase_color");
    }
+
+   //-----------------------------------------------------------------------
 
    /**
     * Prints the phases assigned to each Bitset in a table format
@@ -973,13 +1153,15 @@ namespace moris::GUI
       }
    }
 
+   //-----------------------------------------------------------------------
+
    void load_demo()
    {
       // Load demo level-set functions
       gLevelSets[0] = load_LS_from_string("sin(0.43*x)+cos(y)-cos(0.53*z)");
       // gLevelSets[1] = load_LS_from_string("sin(x)-1.2*cos(y)+1");
       gLevelSets[1] = load_LS_from_string("3*x+y-1");
-      gLevelSets[2] = load_LS_from_string("x^2+y^2-z");
+      gLevelSets[2] = load_LS_from_string("x^2+y^2-z-1");
       gNumGeoms = 3;
 
       // Set to plot all geometries
@@ -1002,6 +1184,8 @@ namespace moris::GUI
       // Plot all phases
       gPhasesToPlot = {0, 1, 2};
    }
+
+   //-----------------------------------------------------------------------
 
    void display()
    {
@@ -1216,6 +1400,8 @@ namespace moris::GUI
       glutSwapBuffers();
    }
 
+   //-----------------------------------------------------------------------
+
    /*
     * This function is called by GLUT when the window is resized
     */
@@ -1275,6 +1461,10 @@ namespace moris::GUI
          {
             std::cout << "Maximum number of geometries reached." << std::endl;
          }
+      }
+      else if (ch == 'i' || ch == 'I')
+      {
+         gIsocontour = 1 - gIsocontour;
       }
       else if (ch == 'p' || ch == 'P')
       {
@@ -1444,6 +1634,8 @@ namespace moris::GUI
       glutPostRedisplay();
    }
 
+   //-----------------------------------------------------------------------
+
    /*
     *  Functionality to move the camera position
     */
@@ -1511,6 +1703,8 @@ namespace moris::GUI
       }
    }
 
+   //-----------------------------------------------------------------------
+
    // Function for basic animations
    void idle()
    {
@@ -1526,6 +1720,8 @@ namespace moris::GUI
       glutPostRedisplay();
    }
 
+   //-----------------------------------------------------------------------
+
    /*
     *  Mouse motion callback
     */
@@ -1537,44 +1733,21 @@ namespace moris::GUI
          int deltaX = x - gMouseX;
          int deltaY = y - gMouseY;
 
-         // if (gProjectionMain)
-         // {
-         //    // Pan the view based on mouse movement
-         //    double tPanSpeedX = 0.01 / gScaleX; // Adjust pan speed based on zoom level
-         //    double tPanSpeedZ = 0.01 / gScaleZ; // Adjust pan speed based on zoom level
+         // Update angles based on mouse movement
+         gTheta += deltaX * 0.1; // Horizontal movement controls azimuth (yaw)
+         gPhi += deltaY * 0.1;   // Vertical movement controls elevation (pitch)
 
-         //    double tCenterX = 0.5 * (gXLB + gXUB);
-         //    double tCenterZ = 0.5 * (gZLB + gZUB);
+         // Keep phi within reasonable bounds
+         if (gPhi > 89)
+            gPhi = 89;
+         if (gPhi < -89)
+            gPhi = -89;
 
-         //    tCenterX -= deltaX * tPanSpeedX;
-         //    tCenterZ += deltaY * tPanSpeedZ;
-
-         //    gXLB = tCenterX - 0.5 * (gXUB - gXLB);
-         //    gXUB = tCenterX + 0.5 * (gXUB - gXLB);
-         //    gZLB = tCenterZ - 0.5 * (gZUB - gZLB);
-         //    gZUB = tCenterZ + 0.5 * (gZUB - gZLB);
-
-         //    linspace(gXVals, gXLB, gXUB);
-         //    linspace(gZVals, gZLB, gZUB);
-         // }
-         // else
-         {
-            // Update angles based on mouse movement
-            gTheta += deltaX * 0.1; // Horizontal movement controls azimuth (yaw)
-            gPhi += deltaY * 0.1;   // Vertical movement controls elevation (pitch)
-
-            // Keep phi within reasonable bounds
-            if (gPhi > 89)
-               gPhi = 89;
-            if (gPhi < -89)
-               gPhi = -89;
-
-            // Wrap theta around 360 degrees
-            if (gTheta > 360)
-               gTheta -= 360;
-            if (gTheta < 0)
-               gTheta += 360;
-         }
+         // Wrap theta around 360 degrees
+         if (gTheta > 360)
+            gTheta -= 360;
+         if (gTheta < 0)
+            gTheta += 360;
 
          // Store current mouse position
          gMouseX = x;
@@ -1586,6 +1759,8 @@ namespace moris::GUI
          glutPostRedisplay();
       }
    }
+
+   //-----------------------------------------------------------------------
 
    /*
     *  Mouse button callback
@@ -1683,6 +1858,8 @@ namespace moris::GUI
    }
 
 } // namespace moris::GUI
+
+//-----------------------------------------------------------------------
 
 // Main
 int main(int argc, char *argv[])
