@@ -54,3 +54,16 @@ Note that multiple bitsets (combinations of +/- for each geometry) can be mapped
 
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+FEATURES:
+
+Toggling between the two different viewports adds a great deal of convenience changes the flow of inputs. I like how this is implemented and makes it inuitive to interact with the plots to get the data that you want to see.
+
+Clicking a part of the domain highlights it and allows for really simple editing of the phases visually. I did this by unprojecting the pixel coordinates to get the world coordinates, and then evaluating the Level-Set fields to get the bitset at that point. 
+
+I implemented a somewhat slick way to compute zero-isocontour values without having to do something more complex like marching squares. To do this, I render the geometries on the fixed mesh like normal if all the points are in the domain I requested to plot. However, if I detect that the points are along the zero-isocontour when plotting, I instead compute the root using the bisection method and then add the triangle with the root instead of the coordinate that is outside the requested plotting domain. This only ended up making a minor difference in terms of the visual fidelity of the plot, but is still a cool piece of technology.
+
+The color coordinating of the phase table was surprisingly more complex than I thought it would be, since the text is printed in pixel coordinates but vertices are typically drawn in world coordinates. Additionally, getting the alignment of the phase table to be correct no matter how many phases took some work. AI helped with this section more significantly than anywhere else, as it wrote the function to get the legth of strings printed to the screen. One small detail that wasn't particularly difficult to implement but I think adds a nice touch is that when I bitset is selected, the color key also gets the associated texture.
+
+Overall, what I'm most proud of is feedback from my lab. I worked closely with other students in the lab as well as my advisor to implement all the features they asked, resulting in a project that we're all excited about and will get implemented into our daily workflow. I prioritized utility over asthetics here, and the result is a tool that is intuitive to use and interact with if you're familiar with our lab's code. Thus, I'm sure this project will long outlive the lifespan of the course. Although I find a lot of value in this, I understand it may not reflect the course material as best as possible, and am accepting of the fact that my score on the project may reflect that. However, I also think that applying the tools taught in the class in a practical way should also be taken into consideration when scoring the project.
+
+Thank you for a great semester!
